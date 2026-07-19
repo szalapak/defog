@@ -1,0 +1,12 @@
+# Personal Fog of World location data — NEVER commit (each user loads their own)
+Sync/
+*.mldx
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Local-only Claude settings
+.claude/settings.local.json

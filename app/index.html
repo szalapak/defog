@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FogToMaps — Fog of World defog overlay</title>
+  <link rel="stylesheet" href="vendor/leaflet.css" />
+  <style>
+    html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+    #app { display: flex; flex-direction: column; height: 100%; }
+    #bar {
+      display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+      padding: 8px 12px; background: #1f2430; color: #eef; font-size: 14px; z-index: 1200;
+    }
+    #bar button, #bar label.file {
+      background: #2e9a78; color: #fff; border: 0; padding: 6px 12px;
+      border-radius: 6px; cursor: pointer; font-size: 14px;
+    }
+    #bar label.file input { display: none; }
+    #status { margin-left: auto; opacity: .85; }
+    #map { flex: 1; }
+
+    .panel {
+      position: absolute; z-index: 1000; background: #ffffffee; color: #1f2430;
+      border-radius: 10px; box-shadow: 0 2px 12px #0004; font-size: 13px;
+      padding: 10px 12px; width: 232px; backdrop-filter: blur(2px);
+    }
+    #lookPanel { top: 58px; left: 10px; }
+    .panel h3 { margin: 0 0 8px; font-size: 13px; display: flex; justify-content: space-between; cursor: pointer; }
+    .panel .body { display: block; }
+    .panel.collapsed .body { display: none; }
+    .row { margin: 7px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .row label { display: inline-flex; align-items: center; gap: 4px; }
+    .swatches { display: flex; gap: 5px; }
+    .sw { width: 20px; height: 20px; border-radius: 4px; border: 2px solid #fff; box-shadow: 0 0 0 1px #0003; cursor: pointer; }
+    .sw.active { outline: 2px solid #1f2430; }
+    select, input[type=range], input[type=color] { max-width: 100%; }
+    .panel button { background: #3856c9; color: #fff; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
+    .panel button.ghost { background: #e3e6ee; color: #1f2430; }
+    .panel button:disabled { opacity: .5; cursor: default; }
+    .muted { opacity: .7; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="bar">
+      <button id="loadServer">Load my Sync (dev)</button>
+      <label class="file">Pick Sync folder…
+        <input id="folder" type="file" webkitdirectory directory multiple />
+      </label>
+      <span id="status"></span>
+    </div>
+    <div id="map">
+      <!-- Look panel -->
+      <div class="panel" id="lookPanel">
+        <h3 data-toggle="lookPanel">🎨 Customise the look <span>▾</span></h3>
+        <div class="body">
+          <div class="row">
+            <label>Preset</label>
+            <select id="preset">
+              <option value="route">Route planning (mute visited)</option>
+              <option value="highlight">Highlight visited</option>
+              <option value="fog">Fog / coverage view</option>
+            </select>
+          </div>
+          <div class="row">Dim which side:
+            <label><input type="radio" name="target" value="explored" checked /> Visited</label>
+            <label><input type="radio" name="target" value="unexplored" /> Unexplored</label>
+          </div>
+          <div class="row">
+            <label>Style</label>
+            <select id="styleSel">
+              <option value="desaturate">Desaturate (grey out)</option>
+              <option value="tint">Flat tint</option>
+              <option value="darken">Darken (fog)</option>
+            </select>
+          </div>
+          <div class="row" id="colorRow">Colour
+            <span class="swatches" id="swatches"></span>
+            <input type="color" id="colorPick" value="#3a4a5a" />
+          </div>
+          <div class="row">Opacity <input type="range" id="alpha" min="30" max="255" value="190" style="flex:1" /></div>
+          <div class="row">Widen paths <input type="range" id="dilate" min="0" max="4" value="0" style="flex:1" /></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="vendor/leaflet.js"></script>
+  <script src="vendor/pako_inflate.min.js"></script>
+  <script src="src/parser.js"></script>
+  <script src="src/fogLayer.js"></script>
+  <script src="src/main.js"></script>
+</body>
+</html>
