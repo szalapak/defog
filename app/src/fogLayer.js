@@ -48,7 +48,7 @@
       this.fogMap = fogMap;
       this.style = Object.assign({
         target: "explored",   // which cells get painted: "explored" | "unexplored"
-        style: "desaturate",  // "desaturate" | "darken" | "tint"
+        style: "tint",        // "desaturate" | "darken" | "tint" (only "tint" is exposed in the UI now)
         color: "#3a4a5a",
         alpha: 190,           // 0..255
         dilate: 0             // widen defogged paths by this many cells (only when zoomed in); 0 = raw

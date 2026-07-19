@@ -206,16 +206,53 @@ ${pts}
 </gpx>`;
   };
 
-  RouteTool.prototype.downloadGPX = function () {
-    if (this.routeCoords.length < 2) return false;
-    const blob = new Blob([this.toGPX()], { type: "application/gpx+xml" });
+  RouteTool.prototype.toKML = function () {
+    const name = "FogToMaps route (" + this.profile + ")";
+    const coords = this.routeCoords
+      .map((c) => c[0].toFixed(6) + "," + c[1].toFixed(6) + "," + (c.length > 2 ? c[2].toFixed(1) : "0"))
+      .join(" ");
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+  <name>${name}</name>
+  <Style id="r"><LineStyle><color>ff5522ff</color><width>4</width></LineStyle></Style>
+  <Placemark><name>${name}</name><styleUrl>#r</styleUrl>
+    <LineString><tessellate>1</tessellate><coordinates>${coords}</coordinates></LineString>
+  </Placemark>
+</Document></kml>`;
+  };
+
+  function saveBlob(text, mime, filename) {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "fogtomaps-route.gpx";
+    a.href = URL.createObjectURL(new Blob([text], { type: mime }));
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+
+  RouteTool.prototype.downloadGPX = function () {
+    if (this.routeCoords.length < 2) return false;
+    saveBlob(this.toGPX(), "application/gpx+xml", "fogtomaps-route.gpx");
     return true;
+  };
+  RouteTool.prototype.downloadKML = function () {
+    if (this.routeCoords.length < 2) return false;
+    saveBlob(this.toKML(), "application/vnd.google-earth.kml+xml", "fogtomaps-route.kml");
+    return true;
+  };
+
+  // Google Maps directions URL from the waypoints (Google re-routes via its own engine).
+  // travelmode: driving | bicycling | walking | transit
+  RouteTool.prototype.googleMapsUrl = function () {
+    if (this.wps.length < 2) return null;
+    const MODE = { "car-fast": "driving", rail: "transit", "hiking-mountain": "walking" };
+    const mode = MODE[this.profile] || (this.profile === "shortest" ? "driving" : "bicycling");
+    const pts = this.wps.map((w) => w.latlng.lat.toFixed(6) + "," + w.latlng.lng.toFixed(6));
+    const origin = pts.shift(), destination = pts.pop();
+    let url = "https://www.google.com/maps/dir/?api=1&travelmode=" + mode +
+      "&origin=" + origin + "&destination=" + destination;
+    if (pts.length) url += "&waypoints=" + pts.join("%7C"); // %7C = |
+    return url;
   };
 
   global.RouteTool = RouteTool;

@@ -1,4 +1,4 @@
-// Wires the UI: load Sync data, render the fog overlay, customise the look.
+// Wires the UI: tabs, fog import + appearance, and route planning.
 (function () {
   const statusEl = document.getElementById("status");
   const setStatus = (m) => { statusEl.textContent = m; };
@@ -7,33 +7,31 @@
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
   }).addTo(map);
-
-  // dedicated pane so the fog blends against the basemap while staying above it
   map.createPane("fog");
   map.getPane("fog").style.zIndex = 350;
 
+  // ---- tabs -------------------------------------------------------------------
+  document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
+    document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("active", p.id === b.dataset.pane));
+  }));
+
+  // ---- fog layer + appearance -------------------------------------------------
   const fogMap = new FogParser.FogMap();
   let fogLayer = null;
-
-  // ---- style presets ----------------------------------------------------------
-  const PRESETS = {
-    route: { target: "explored",   style: "tint",   color: "#3a4a5a", alpha: 150 },
-    fog:   { target: "unexplored", style: "darken", color: "#0e1b34", alpha: 150 }
-  };
-  // muted palette — desaturated so tints don't clash with basemap detail
   const SWATCHES = ["#3a4a5a", "#5a5f66", "#8a5a78", "#6f6a99", "#b08a4f"];
+  const WIDEN_MAX = 4;
 
   const saved = JSON.parse(localStorage.getItem("f2m_style") || "null");
-  let style = saved || Object.assign({ dilate: 1 }, PRESETS.route);
+  let style = saved || { target: "explored", color: "#3a4a5a", alpha: 150, dilate: 1 };
   if (style.dilate == null) style.dilate = 1;
+  style.style = "tint"; // flat tint is the only exposed style
 
   function persist() { localStorage.setItem("f2m_style", JSON.stringify(style)); }
-
   function ensureLayer() {
     if (!fogLayer) {
       fogLayer = createFogLayer(fogMap, {
-        pane: "fog", maxZoom: 19, minZoom: 0, updateWhenIdle: true,
-        style: Object.assign({}, style)
+        pane: "fog", maxZoom: 19, minZoom: 0, updateWhenIdle: true, style: Object.assign({}, style)
       });
       fogLayer.addTo(map);
     } else {
@@ -41,75 +39,49 @@
     }
   }
 
-  // ---- look panel controls ----------------------------------------------------
-  const presetSel = document.getElementById("preset");
-  const styleSel = document.getElementById("styleSel");
   const alpha = document.getElementById("alpha");
   const colorPick = document.getElementById("colorPick");
   const swatchBox = document.getElementById("swatches");
   const widenVal = document.getElementById("widenVal");
   const widenMinus = document.getElementById("widenMinus");
   const widenPlus = document.getElementById("widenPlus");
-  const WIDEN_MAX = 4;
 
   function syncControls() {
     document.querySelector(`input[name="target"][value="${style.target}"]`).checked = true;
-    styleSel.value = style.style;
     alpha.value = style.alpha;
+    colorPick.value = style.color;
     widenVal.textContent = style.dilate;
     widenMinus.disabled = style.dilate <= 0;
     widenPlus.disabled = style.dilate >= WIDEN_MAX;
-    colorPick.value = style.color;
-    document.getElementById("colorRow").style.display = style.style === "desaturate" ? "none" : "";
     [...swatchBox.children].forEach((s) => s.classList.toggle("active", s.dataset.c === style.color));
   }
-  function applyStyle(patch, redrawPreset) {
-    Object.assign(style, patch);
-    if (redrawPreset) presetSel.value = redrawPreset;
-    persist();
-    syncControls();
+  function applyStyle(patch) {
+    Object.assign(style, patch); persist(); syncControls();
     if (fogLayer) fogLayer.setStyle(style);
   }
-
   SWATCHES.forEach((c) => {
     const s = document.createElement("span");
     s.className = "sw"; s.style.background = c; s.dataset.c = c;
     s.addEventListener("click", () => applyStyle({ color: c }));
     swatchBox.appendChild(s);
   });
-  presetSel.addEventListener("change", () => applyStyle(Object.assign({}, PRESETS[presetSel.value])));
-  styleSel.addEventListener("change", () => applyStyle({ style: styleSel.value }));
   alpha.addEventListener("input", () => applyStyle({ alpha: parseInt(alpha.value, 10) }));
-  const stepWiden = (d) => applyStyle({ dilate: Math.max(0, Math.min(WIDEN_MAX, style.dilate + d)) });
-  widenMinus.addEventListener("click", () => stepWiden(-1));
-  widenPlus.addEventListener("click", () => stepWiden(1));
   colorPick.addEventListener("input", () => applyStyle({ color: colorPick.value }));
   document.querySelectorAll('input[name="target"]').forEach((r) =>
     r.addEventListener("change", () => applyStyle({ target: r.value })));
-
-  // collapsible panels
-  document.querySelectorAll("h3[data-toggle]").forEach((h) =>
-    h.addEventListener("click", () => document.getElementById(h.dataset.toggle).classList.toggle("collapsed")));
-
-  // stop panel interactions (slider drags, clicks, scroll) from panning/zooming the map
-  document.querySelectorAll(".panel").forEach((p) => {
-    L.DomEvent.disableClickPropagation(p);
-    L.DomEvent.disableScrollPropagation(p);
-  });
-
+  const stepWiden = (d) => applyStyle({ dilate: Math.max(0, Math.min(WIDEN_MAX, style.dilate + d)) });
+  widenMinus.addEventListener("click", () => stepWiden(-1));
+  widenPlus.addEventListener("click", () => stepWiden(1));
   syncControls();
 
   // ---- data loading -----------------------------------------------------------
-  function inflateToTile(name, buf) {
-    return fogMap.addTile(name, pako.inflate(new Uint8Array(buf)));
-  }
+  function inflateToTile(name, buf) { return fogMap.addTile(name, pako.inflate(new Uint8Array(buf))); }
   function finishLoad() {
     ensureLayer();
     const b = fogMap.latLngBounds();
     if (b) map.fitBounds(b, { padding: [20, 20] });
-    setStatus(`Loaded ${fogMap.tileCount} tiles. Zoom in; unexplored streets stay crisp.`);
+    setStatus(`Loaded ${fogMap.tileCount} tiles.`);
   }
-
   async function loadFromServer() {
     setStatus("Listing /Sync/ …");
     let names;
@@ -141,14 +113,24 @@
   document.getElementById("loadServer").addEventListener("click", loadFromServer);
   document.getElementById("folder").addEventListener("change", (e) => loadFromInput(e.target.files));
 
-  // ---- route planning (BRouter) ----------------------------------------------
-  const exportBtn = document.getElementById("exportGpx");
+  // ---- route planning ---------------------------------------------------------
+  const exportGpxBtn = document.getElementById("exportGpx");
+  const exportKmlBtn = document.getElementById("exportKml");
+  const gmapsBtn = document.getElementById("openGmaps");
   const drawBtn = document.getElementById("drawToggle");
   const statsEl = document.getElementById("routeStats");
-  const profileSel = document.getElementById("profile");
-  const IDLE = "Click the map to drop waypoints. Drag the line to bend the route; click a point to remove it.";
-
+  const elevEl = document.getElementById("elev");
   const wpListEl = document.getElementById("wpList");
+  const ELEV_MODES = new Set(["trekking", "fastbike", "hiking-mountain"]);
+  const IDLE = "Click the map to drop waypoints. Drag the line to bend the route; click a point to remove it.";
+  let profile = "trekking";
+
+  function setExports(routable) {
+    exportGpxBtn.disabled = !routable;
+    exportKmlBtn.disabled = !routable;
+    gmapsBtn.disabled = route.wps.length < 2;
+  }
+
   function renderWps(list) {
     wpListEl.innerHTML = "";
     list.forEach((ll, i) => {
@@ -164,19 +146,58 @@
     });
   }
 
+  function renderElev() {
+    elevEl.innerHTML = "";
+    const c = route.routeCoords;
+    if (!ELEV_MODES.has(profile) || c.length < 2 || c[0].length < 3) return;
+    const W = 272, H = 74, padT = 8, padB = 14, padL = 4, padR = 4;
+    const dists = [0]; let total = 0;
+    for (let i = 1; i < c.length; i++) {
+      total += L.latLng(c[i - 1][1], c[i - 1][0]).distanceTo(L.latLng(c[i][1], c[i][0]));
+      dists.push(total);
+    }
+    if (total < 1) return;
+    const eles = c.map((p) => p[2]);
+    let emin = Math.min.apply(null, eles), emax = Math.max.apply(null, eles);
+    if (emax - emin < 1) emax = emin + 1;
+    const x = (d) => padL + (d / total) * (W - padL - padR);
+    const y = (e) => padT + (1 - (e - emin) / (emax - emin)) * (H - padT - padB);
+    let path = "M" + x(0) + "," + y(eles[0]);
+    for (let i = 1; i < c.length; i++) path += " L" + x(dists[i]) + "," + y(eles[i]);
+    const area = path + " L" + x(total) + "," + (H - padB) + " L" + x(0) + "," + (H - padB) + " Z";
+    elevEl.innerHTML =
+      `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">` +
+      `<path d="${area}" fill="#3856c933"/>` +
+      `<path d="${path}" fill="none" stroke="#3856c9" stroke-width="1.5"/>` +
+      `<text class="lbl" x="4" y="10">${Math.round(emax)} m</text>` +
+      `<text class="lbl" x="4" y="${H - 3}">${Math.round(emin)} m</text>` +
+      `<text class="lbl" x="${W - 4}" y="${H - 3}" text-anchor="end">${(total / 1000).toFixed(1)} km</text>` +
+      `</svg>`;
+  }
+
   const route = new RouteTool(map, {
-    profile: profileSel.value,
+    profile,
     onWaypoints: renderWps,
     onChange: (s) => {
-      if (!s) { statsEl.textContent = IDLE; exportBtn.disabled = true; return; }
+      if (!s) { statsEl.textContent = IDLE; setExports(false); elevEl.innerHTML = ""; return; }
       if (s.loading) { statsEl.textContent = `Routing ${s.points} waypoints…`; return; }
-      if (s.error) { statsEl.textContent = "Routing server unreachable — showing a straight line."; exportBtn.disabled = route.routeCoords.length < 2; return; }
-      if (s.km == null) { statsEl.textContent = `${s.points} waypoint${s.points > 1 ? "s" : ""} — add one more to route.`; exportBtn.disabled = true; return; }
+      if (s.error) { statsEl.textContent = "Routing server unreachable — showing a straight line."; setExports(route.routeCoords.length >= 2); elevEl.innerHTML = ""; return; }
+      if (s.km == null) { statsEl.textContent = `${s.points} waypoint${s.points > 1 ? "s" : ""} — add one more to route.`; setExports(false); elevEl.innerHTML = ""; return; }
       statsEl.innerHTML = `<b>${s.km.toFixed(1)} km</b> · ↑${s.ascent} m ↓${s.descent} m · ~${Math.round(s.seconds / 60)} min`;
-      exportBtn.disabled = false;
+      setExports(true); renderElev();
     }
   });
-  profileSel.addEventListener("change", () => route.setProfile(profileSel.value));
+
+  // transport modes
+  const modeBtns = document.querySelectorAll("#modes button");
+  function setMode(p) {
+    profile = p;
+    modeBtns.forEach((b) => b.classList.toggle("active", b.dataset.p === p));
+    route.setProfile(p);
+  }
+  modeBtns.forEach((b) => b.addEventListener("click", () => setMode(b.dataset.p)));
+  setMode("trekking");
+
   drawBtn.addEventListener("click", () => {
     const on = !route.active;
     route.setActive(on);
@@ -185,7 +206,9 @@
   });
   document.getElementById("undo").addEventListener("click", () => route.undo());
   document.getElementById("clear").addEventListener("click", () => route.clear());
-  exportBtn.addEventListener("click", () => route.downloadGPX());
+  exportGpxBtn.addEventListener("click", () => route.downloadGPX());
+  exportKmlBtn.addEventListener("click", () => route.downloadKML());
+  gmapsBtn.addEventListener("click", () => { const u = route.googleMapsUrl(); if (u) window.open(u, "_blank", "noopener"); });
 
-  setStatus('Ready. Click "Load my Sync (dev)" or pick your Sync folder.');
+  setStatus("Ready. On the Fog tab, load your Sync folder.");
 })();
