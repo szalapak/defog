@@ -142,25 +142,34 @@
   document.getElementById("loadServer").addEventListener("click", loadFromServer);
   document.getElementById("folder").addEventListener("change", (e) => loadFromInput(e.target.files));
 
-  // ---- export -----------------------------------------------------------------
-  const exportNote = document.getElementById("exportNote");
-  document.getElementById("exportKml").addEventListener("click", () => {
-    if (!fogMap.tileCount) { exportNote.textContent = "Load your Sync data first."; return; }
-    const target = document.getElementById("exportWhat").value;
-    exportNote.textContent = "Building export…";
-    // let the label paint before the (synchronous) build
-    setTimeout(() => {
-      // export widening is 0: the ~30 m aggregation grid already fills street width,
-      // and coarse-cell dilation would merge separate streets together.
-      const res = FogExport.toKML(fogMap, map.getBounds(), {
-        target, dilate: 0, color: style.color, alpha: style.alpha
-      });
-      FogExport.download(res.kml, `fogtomaps-${target}.kml`);
-      exportNote.textContent =
-        `Exported ${res.rects} shapes at ~${res.squareMeters} m detail` +
-        (res.cappedAt ? " (view too dense — zoom in for more detail)." : ".");
-    }, 20);
+  // ---- route planning (BRouter) ----------------------------------------------
+  const exportBtn = document.getElementById("exportGpx");
+  const drawBtn = document.getElementById("drawToggle");
+  const statsEl = document.getElementById("routeStats");
+  const profileSel = document.getElementById("profile");
+  const IDLE = "Click the map to drop waypoints. Drag to move, click a point to remove.";
+
+  const route = new RouteTool(map, {
+    profile: profileSel.value,
+    onChange: (s) => {
+      if (!s) { statsEl.textContent = IDLE; exportBtn.disabled = true; return; }
+      if (s.loading) { statsEl.textContent = `Routing ${s.points} waypoints…`; return; }
+      if (s.error) { statsEl.textContent = "Routing server unreachable — showing a straight line."; exportBtn.disabled = route.routeCoords.length < 2; return; }
+      if (s.km == null) { statsEl.textContent = `${s.points} waypoint${s.points > 1 ? "s" : ""} — add one more to route.`; exportBtn.disabled = true; return; }
+      statsEl.innerHTML = `<b>${s.km.toFixed(1)} km</b> · ↑${s.ascent} m ↓${s.descent} m · ~${Math.round(s.seconds / 60)} min`;
+      exportBtn.disabled = false;
+    }
   });
+  profileSel.addEventListener("change", () => route.setProfile(profileSel.value));
+  drawBtn.addEventListener("click", () => {
+    const on = !route.active;
+    route.setActive(on);
+    drawBtn.textContent = on ? "Stop drawing" : "Start drawing";
+    drawBtn.style.background = on ? "#c9384f" : "";
+  });
+  document.getElementById("undo").addEventListener("click", () => route.undo());
+  document.getElementById("clear").addEventListener("click", () => route.clear());
+  exportBtn.addEventListener("click", () => route.downloadGPX());
 
   setStatus('Ready. Click "Load my Sync (dev)" or pick your Sync folder.');
 })();

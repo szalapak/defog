@@ -26,6 +26,13 @@
       padding: 10px 12px; width: 232px; backdrop-filter: blur(2px);
     }
     #lookPanel { top: 58px; left: 10px; }
+    #routePanel { top: 58px; right: 10px; }
+    .wp {
+      width: 18px; height: 18px; border-radius: 50%; background: #ff2d55; color: #fff;
+      border: 2px solid #fff; box-shadow: 0 1px 4px #0006; font-size: 11px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; cursor: grab;
+    }
+    #routeStats b { font-variant-numeric: tabular-nums; }
     .panel h3 { margin: 0 0 8px; font-size: 13px; display: flex; justify-content: space-between; cursor: pointer; }
     .panel .body { display: block; }
     .panel.collapsed .body { display: none; }
@@ -86,15 +93,6 @@
             <input type="color" id="colorPick" value="#3a4a5a" />
           </div>
           <div class="row">Opacity <input type="range" id="alpha" min="30" max="255" value="190" style="flex:1" /></div>
-          <div class="row" style="border-top:1px solid #0002; padding-top:9px; margin-top:9px;">
-            Export view
-            <select id="exportWhat">
-              <option value="explored">Explored</option>
-              <option value="unexplored">Unexplored (gaps)</option>
-            </select>
-            <button id="exportKml">⬇ KML</button>
-          </div>
-          <div class="row muted" id="exportNote">For mapy.cz / Google My Maps. Zoom to the area first.</div>
           <div class="row">Widen paths
             <span class="stepper">
               <button id="widenMinus" class="step" title="Narrower">−</button>
@@ -105,6 +103,30 @@
         </div>
       </div>
 
+      <!-- Route panel -->
+      <div class="panel" id="routePanel">
+        <h3 data-toggle="routePanel">🚴 Plan a route <span>▾</span></h3>
+        <div class="body">
+          <div class="row">
+            <label>Mode</label>
+            <select id="profile">
+              <option value="trekking">Bike (trekking)</option>
+              <option value="fastbike">Road bike</option>
+              <option value="hiking-mountain">Walk / hike</option>
+              <option value="car-fast">Car</option>
+              <option value="shortest">Shortest line</option>
+            </select>
+          </div>
+          <div class="row">
+            <button id="drawToggle">Start drawing</button>
+            <button id="undo" class="ghost">Undo</button>
+            <button id="clear" class="ghost">Clear</button>
+          </div>
+          <div class="row muted" id="routeStats">Click the map to drop waypoints. Drag to move, click a point to remove.</div>
+          <div class="row"><button id="exportGpx" disabled>⬇ Export route GPX</button></div>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -112,7 +134,7 @@
   <script src="vendor/pako_inflate.min.js"></script>
   <script src="src/parser.js"></script>
   <script src="src/fogLayer.js"></script>
-  <script src="src/export.js"></script>
+  <script src="src/route.js"></script>
   <script src="src/main.js"></script>
 </body>
 </html>
