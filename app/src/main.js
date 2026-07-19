@@ -17,16 +17,15 @@
 
   // ---- style presets ----------------------------------------------------------
   const PRESETS = {
-    route:     { target: "explored",   style: "tint",       color: "#3a4a5a", alpha: 150 },
-    highlight: { target: "explored",   style: "tint",       color: "#8a5a78", alpha: 130 },
-    fog:       { target: "unexplored", style: "darken",     color: "#0e1b34", alpha: 150 }
+    route: { target: "explored",   style: "tint",   color: "#3a4a5a", alpha: 150 },
+    fog:   { target: "unexplored", style: "darken", color: "#0e1b34", alpha: 150 }
   };
   // muted palette — desaturated so tints don't clash with basemap detail
   const SWATCHES = ["#3a4a5a", "#5a5f66", "#8a5a78", "#6f6a99", "#b08a4f"];
 
   const saved = JSON.parse(localStorage.getItem("f2m_style") || "null");
-  let style = saved || Object.assign({ dilate: 0 }, PRESETS.route);
-  if (style.dilate == null) style.dilate = 0;
+  let style = saved || Object.assign({ dilate: 1 }, PRESETS.route);
+  if (style.dilate == null) style.dilate = 1;
 
   function persist() { localStorage.setItem("f2m_style", JSON.stringify(style)); }
 
@@ -147,10 +146,27 @@
   const drawBtn = document.getElementById("drawToggle");
   const statsEl = document.getElementById("routeStats");
   const profileSel = document.getElementById("profile");
-  const IDLE = "Click the map to drop waypoints. Drag to move, click a point to remove.";
+  const IDLE = "Click the map to drop waypoints. Drag the line to bend the route; click a point to remove it.";
+
+  const wpListEl = document.getElementById("wpList");
+  function renderWps(list) {
+    wpListEl.innerHTML = "";
+    list.forEach((ll, i) => {
+      const row = document.createElement("div");
+      row.className = "wpRow";
+      row.innerHTML =
+        `<span class="n">${i + 1}</span>` +
+        `<span class="co">${ll.lat.toFixed(4)}, ${ll.lng.toFixed(4)}</span>` +
+        `<button class="x" title="Remove">✕</button>`;
+      row.querySelector(".co").addEventListener("click", () => map.panTo(ll));
+      row.querySelector(".x").addEventListener("click", () => route.removeAt(i));
+      wpListEl.appendChild(row);
+    });
+  }
 
   const route = new RouteTool(map, {
     profile: profileSel.value,
+    onWaypoints: renderWps,
     onChange: (s) => {
       if (!s) { statsEl.textContent = IDLE; exportBtn.disabled = true; return; }
       if (s.loading) { statsEl.textContent = `Routing ${s.points} waypoints…`; return; }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>FogToMaps — Fog of World defog overlay</title>
+  <title>FogToMaps — Fog of World defog planner</title>
   <link rel="stylesheet" href="vendor/leaflet.css" />
   <style>
     html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
@@ -18,40 +18,49 @@
     }
     #bar label.file input { display: none; }
     #status { margin-left: auto; opacity: .85; }
-    #map { flex: 1; }
 
-    .panel {
-      position: absolute; z-index: 1000; background: #ffffffee; color: #1f2430;
-      border-radius: 10px; box-shadow: 0 2px 12px #0004; font-size: 13px;
-      padding: 10px 12px; width: 232px; backdrop-filter: blur(2px);
+    #main { display: flex; flex: 1; min-height: 0; }
+    #map { flex: 1; }
+    #sidebar {
+      width: 300px; flex: 0 0 300px; overflow-y: auto; background: #f4f5f8;
+      color: #1f2430; border-left: 1px solid #0002; font-size: 13px;
     }
-    #lookPanel { top: 58px; left: 10px; }
-    #routePanel { top: 58px; right: 10px; }
-    .wp {
-      width: 18px; height: 18px; border-radius: 50%; background: #ff2d55; color: #fff;
-      border: 2px solid #fff; box-shadow: 0 1px 4px #0006; font-size: 11px; font-weight: 700;
-      display: flex; align-items: center; justify-content: center; cursor: grab;
+    .section { border-bottom: 1px solid #0001; }
+    .section > h3 {
+      margin: 0; padding: 11px 14px; font-size: 13px; background: #e9ebf1;
+      display: flex; justify-content: space-between; cursor: pointer; user-select: none;
     }
-    #routeStats b { font-variant-numeric: tabular-nums; }
-    .panel h3 { margin: 0 0 8px; font-size: 13px; display: flex; justify-content: space-between; cursor: pointer; }
-    .panel .body { display: block; }
-    .panel.collapsed .body { display: none; }
-    .row { margin: 7px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .section.collapsed .body { display: none; }
+    .section .body { padding: 6px 14px 12px; }
+    .row { margin: 8px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .row label { display: inline-flex; align-items: center; gap: 4px; }
     .swatches { display: flex; gap: 5px; }
     .sw { width: 20px; height: 20px; border-radius: 4px; border: 2px solid #fff; box-shadow: 0 0 0 1px #0003; cursor: pointer; }
     .sw.active { outline: 2px solid #1f2430; }
     select, input[type=range], input[type=color] { max-width: 100%; }
-    .panel button { background: #3856c9; color: #fff; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
-    .panel button.ghost { background: #e3e6ee; color: #1f2430; }
-    .panel button:disabled { opacity: .4; cursor: default; }
-    .stepper { display: inline-flex; align-items: center; gap: 8px; }
-    .stepper .step {
-      width: 26px; height: 26px; padding: 0; font-size: 17px; line-height: 1;
-      background: #e3e6ee; color: #1f2430; border-radius: 6px;
-    }
-    #widenVal { min-width: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+    button.act { background: #3856c9; color: #fff; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
+    button.ghost { background: #e0e3ec; color: #1f2430; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
+    button:disabled { opacity: .4; cursor: default; }
     .muted { opacity: .7; font-size: 12px; }
+    .stepper { display: inline-flex; align-items: center; gap: 8px; }
+    .stepper .step { width: 26px; height: 26px; padding: 0; font-size: 17px; line-height: 1;
+      background: #e0e3ec; color: #1f2430; border: 0; border-radius: 6px; cursor: pointer; }
+    #widenVal { min-width: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+    #routeStats b { font-variant-numeric: tabular-nums; }
+
+    /* waypoint list */
+    #wpList { margin: 4px 0; }
+    #wpList:empty { display: none; }
+    .wpRow { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+    .wpRow .n { width: 20px; height: 20px; border-radius: 50%; background: #ff2d55; color: #fff;
+      font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+    .wpRow .co { flex: 1; font-variant-numeric: tabular-nums; opacity: .8; cursor: pointer; }
+    .wpRow .x { background: none; border: 0; color: #c0392b; cursor: pointer; font-size: 15px; padding: 0 4px; }
+
+    /* map waypoint markers */
+    .wp { width: 18px; height: 18px; border-radius: 50%; background: #ff2d55; color: #fff;
+      border: 2px solid #fff; box-shadow: 0 1px 4px #0006; font-size: 11px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; cursor: grab; }
   </style>
 </head>
 <body>
@@ -63,70 +72,75 @@
       </label>
       <span id="status"></span>
     </div>
-    <div id="map">
-      <!-- Look panel -->
-      <div class="panel" id="lookPanel">
-        <h3 data-toggle="lookPanel">🎨 Customise the look <span>▾</span></h3>
-        <div class="body">
-          <div class="row">
-            <label>Preset</label>
-            <select id="preset">
-              <option value="route">Route planning (mute visited)</option>
-              <option value="highlight">Highlight visited</option>
-              <option value="fog">Fog / coverage view</option>
-            </select>
-          </div>
-          <div class="row">Dim which side:
-            <label><input type="radio" name="target" value="explored" checked /> Visited</label>
-            <label><input type="radio" name="target" value="unexplored" /> Unexplored</label>
-          </div>
-          <div class="row">
-            <label>Style</label>
-            <select id="styleSel">
-              <option value="desaturate">Desaturate (grey out)</option>
-              <option value="tint">Flat tint</option>
-              <option value="darken">Darken (fog)</option>
-            </select>
-          </div>
-          <div class="row" id="colorRow">Colour
-            <span class="swatches" id="swatches"></span>
-            <input type="color" id="colorPick" value="#3a4a5a" />
-          </div>
-          <div class="row">Opacity <input type="range" id="alpha" min="30" max="255" value="190" style="flex:1" /></div>
-          <div class="row">Widen paths
-            <span class="stepper">
-              <button id="widenMinus" class="step" title="Narrower">−</button>
-              <span id="widenVal">0</span>
-              <button id="widenPlus" class="step" title="Wider">+</button>
-            </span>
+
+    <div id="main">
+      <div id="map"></div>
+      <aside id="sidebar">
+
+        <!-- Customise the look -->
+        <div class="section" id="lookSection">
+          <h3 data-toggle="lookSection">🎨 Customise the look <span>▾</span></h3>
+          <div class="body">
+            <div class="row">
+              <label>Preset</label>
+              <select id="preset">
+                <option value="route">Route planning (mute visited)</option>
+                <option value="fog">Fog / coverage view</option>
+              </select>
+            </div>
+            <div class="row">Dim which side:
+              <label><input type="radio" name="target" value="explored" checked /> Visited</label>
+              <label><input type="radio" name="target" value="unexplored" /> Unexplored</label>
+            </div>
+            <div class="row">
+              <label>Style</label>
+              <select id="styleSel">
+                <option value="desaturate">Desaturate (grey out)</option>
+                <option value="tint">Flat tint</option>
+                <option value="darken">Darken (fog)</option>
+              </select>
+            </div>
+            <div class="row" id="colorRow">Colour
+              <span class="swatches" id="swatches"></span>
+              <input type="color" id="colorPick" value="#3a4a5a" />
+            </div>
+            <div class="row">Opacity <input type="range" id="alpha" min="30" max="255" value="190" style="flex:1" /></div>
+            <div class="row">Widen paths
+              <span class="stepper">
+                <button id="widenMinus" class="step" title="Narrower">−</button>
+                <span id="widenVal">1</span>
+                <button id="widenPlus" class="step" title="Wider">+</button>
+              </span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Route panel -->
-      <div class="panel" id="routePanel">
-        <h3 data-toggle="routePanel">🚴 Plan a route <span>▾</span></h3>
-        <div class="body">
-          <div class="row">
-            <label>Mode</label>
-            <select id="profile">
-              <option value="trekking">Bike (trekking)</option>
-              <option value="fastbike">Road bike</option>
-              <option value="hiking-mountain">Walk / hike</option>
-              <option value="car-fast">Car</option>
-              <option value="shortest">Shortest line</option>
-            </select>
+        <!-- Plan a route -->
+        <div class="section" id="routeSection">
+          <h3 data-toggle="routeSection">🚴 Plan a route <span>▾</span></h3>
+          <div class="body">
+            <div class="row">
+              <label>Mode</label>
+              <select id="profile">
+                <option value="trekking">Bike (trekking)</option>
+                <option value="fastbike">Road bike</option>
+                <option value="hiking-mountain">Walk / hike</option>
+                <option value="car-fast">Car</option>
+                <option value="shortest">Shortest line</option>
+              </select>
+            </div>
+            <div class="row">
+              <button id="drawToggle" class="act">Start drawing</button>
+              <button id="undo" class="ghost">Undo</button>
+              <button id="clear" class="ghost">Clear</button>
+            </div>
+            <div class="row muted" id="routeStats">Click the map to drop waypoints. Drag the line to bend the route; click a point to remove it.</div>
+            <div id="wpList"></div>
+            <div class="row"><button id="exportGpx" class="act" disabled>⬇ Export route GPX</button></div>
           </div>
-          <div class="row">
-            <button id="drawToggle">Start drawing</button>
-            <button id="undo" class="ghost">Undo</button>
-            <button id="clear" class="ghost">Clear</button>
-          </div>
-          <div class="row muted" id="routeStats">Click the map to drop waypoints. Drag to move, click a point to remove.</div>
-          <div class="row"><button id="exportGpx" disabled>⬇ Export route GPX</button></div>
         </div>
-      </div>
 
+      </aside>
     </div>
   </div>
 

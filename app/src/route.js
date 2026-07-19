@@ -1,6 +1,8 @@
 // Route planning on the map, snapped to real roads/paths via BRouter (free, no key).
-// Click to add waypoints; drag to move; click a point to remove. Re-routes on every
-// change. Exports the finished route as a GPX track (with elevation).
+// - click to add a waypoint (endpoint)
+// - drag a waypoint to move it; click a waypoint to remove it
+// - drag the route LINE to insert a new waypoint mid-route and pull it through a point
+// - exports the finished route as a GPX track (with elevation)
 (function (global) {
   const BROUTER = "https://brouter.de/brouter";
 
@@ -12,13 +14,20 @@
     opts = opts || {};
     this.map = map;
     this.profile = opts.profile || "trekking";
-    this.onChange = opts.onChange || null;
-    this.wps = [];            // { marker, latlng }
+    this.onChange = opts.onChange || null;       // stats
+    this.onWaypoints = opts.onWaypoints || null; // waypoint list changed
+    this.wps = [];            // { marker, latlng, _ri }
     this.routeCoords = [];    // [[lon,lat,ele], ...] from the last successful route
     this.line = L.polyline([], { color: "#ff2d55", weight: 4, opacity: 0.95 }).addTo(map);
     this.active = false;
     this._reqId = 0;
-    this._onClick = (e) => this.add(e.latlng);
+    this._suppressClick = false;
+
+    this._onClick = (e) => {
+      if (this._suppressClick) { this._suppressClick = false; return; }
+      this.add(e.latlng);
+    };
+    this.line.on("mousedown", (e) => this._grabLine(e));
   }
 
   RouteTool.prototype.setActive = function (on) {
@@ -30,13 +39,25 @@
 
   RouteTool.prototype.setProfile = function (p) { this.profile = p; this._recalc(); };
 
-  RouteTool.prototype.add = function (latlng) {
-    const marker = L.marker(latlng, { draggable: true, icon: wpIcon(this.wps.length + 1) }).addTo(this.map);
-    const wp = { marker, latlng };
+  RouteTool.prototype._makeWp = function (latlng, index) {
+    const marker = L.marker(latlng, { draggable: true, icon: wpIcon(index + 1) }).addTo(this.map);
+    const wp = { marker, latlng, _ri: -1 };
     marker.on("dragend", () => { wp.latlng = marker.getLatLng(); this._recalc(); });
     marker.on("click", (e) => { L.DomEvent.stop(e); this._remove(wp); });
-    this.wps.push(wp);
+    return wp;
+  };
+
+  RouteTool.prototype.add = function (latlng) {
+    this.wps.push(this._makeWp(latlng, this.wps.length));
+    this._emitWps();
     this._recalc();
+  };
+
+  RouteTool.prototype._insertAt = function (i, latlng) {
+    const wp = this._makeWp(latlng, i);
+    this.wps.splice(i, 0, wp);
+    this._relabel();
+    return wp;
   };
 
   RouteTool.prototype._remove = function (wp) {
@@ -45,29 +66,79 @@
     this.map.removeLayer(wp.marker);
     this.wps.splice(i, 1);
     this._relabel();
+    this._emitWps();
     this._recalc();
   };
-
-  RouteTool.prototype.undo = function () {
-    if (this.wps.length) this._remove(this.wps[this.wps.length - 1]);
-  };
+  RouteTool.prototype.removeAt = function (i) { if (this.wps[i]) this._remove(this.wps[i]); };
+  RouteTool.prototype.undo = function () { if (this.wps.length) this._remove(this.wps[this.wps.length - 1]); };
 
   RouteTool.prototype.clear = function () {
     this.wps.forEach((w) => this.map.removeLayer(w.marker));
     this.wps = [];
     this.routeCoords = [];
     this.line.setLatLngs([]);
+    this._emitWps();
     this._emit(null);
   };
 
   RouteTool.prototype._relabel = function () {
     this.wps.forEach((w, i) => w.marker.setIcon(wpIcon(i + 1)));
   };
-
-  RouteTool.prototype._emit = function (stats) {
-    if (this.onChange) this.onChange(stats);
+  RouteTool.prototype._emit = function (s) { if (this.onChange) this.onChange(s); };
+  RouteTool.prototype._emitWps = function () {
+    if (this.onWaypoints) this.onWaypoints(this.wps.map((w) => w.latlng));
   };
 
+  // ----- inserting a waypoint by grabbing the route line -----------------------
+  RouteTool.prototype._nearestRouteIndex = function (latlng) {
+    let best = 0, bd = Infinity;
+    const c = this.routeCoords;
+    for (let i = 0; i < c.length; i++) {
+      const dx = c[i][0] - latlng.lng, dy = c[i][1] - latlng.lat;
+      const d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  };
+
+  RouteTool.prototype._insertionIndex = function (latlng) {
+    // which waypoint-gap does the grabbed point fall in? -> index to splice at
+    if (this.routeCoords.length >= 2 && this.wps.every((w) => w._ri >= 0)) {
+      const k = this._nearestRouteIndex(latlng);
+      let a = 0;
+      for (let i = 0; i < this.wps.length; i++) if (this.wps[i]._ri <= k) a = i;
+      return Math.min(Math.max(a + 1, 1), this.wps.length);
+    }
+    // fallback: nearest straight segment between consecutive waypoints
+    let best = 1, bd = Infinity;
+    for (let i = 0; i < this.wps.length - 1; i++) {
+      const d = L.LineUtil.pointToSegmentDistance(
+        this.map.latLngToLayerPoint(latlng),
+        this.map.latLngToLayerPoint(this.wps[i].latlng),
+        this.map.latLngToLayerPoint(this.wps[i + 1].latlng));
+      if (d < bd) { bd = d; best = i + 1; }
+    }
+    return best;
+  };
+
+  RouteTool.prototype._grabLine = function (e) {
+    if (this.wps.length < 2) return;
+    L.DomEvent.stop(e);
+    this._suppressClick = true;
+    const wp = this._insertAt(this._insertionIndex(e.latlng), e.latlng);
+    this._emitWps();
+    const map = this.map;
+    map.dragging.disable();
+    const move = (ev) => { wp.latlng = ev.latlng; wp.marker.setLatLng(ev.latlng); this.line.setLatLngs(this.wps.map((w) => w.latlng)); };
+    const up = () => {
+      map.off("mousemove", move); map.off("mouseup", up); map.dragging.enable();
+      setTimeout(() => { this._suppressClick = false; }, 0);
+      this._recalc();
+    };
+    map.on("mousemove", move); map.on("mouseup", up);
+  };
+
+  // ----- routing ---------------------------------------------------------------
   RouteTool.prototype._recalc = async function () {
     if (this.wps.length < 2) {
       this.routeCoords = [];
@@ -83,19 +154,23 @@
       const res = await fetch(url);
       if (!res.ok) throw new Error("HTTP " + res.status);
       const gj = await res.json();
-      if (reqId !== this._reqId) return; // a newer request superseded this one
+      if (reqId !== this._reqId) return; // superseded
       const feat = gj.features[0];
-      const coords = feat.geometry.coordinates; // [lon,lat,ele]
+      const coords = feat.geometry.coordinates;
       this.routeCoords = coords;
       this.line.setLatLngs(coords.map((c) => [c[1], c[0]]));
+      this._indexWaypoints();
       this._emit(Object.assign({ points: this.wps.length }, this._stats(feat, coords)));
     } catch (e) {
       if (reqId !== this._reqId) return;
-      // fallback: straight dashed line between waypoints so the user still sees intent
       this.routeCoords = this.wps.map((w) => [w.latlng.lng, w.latlng.lat]);
       this.line.setLatLngs(this.wps.map((w) => w.latlng));
       this._emit({ points: this.wps.length, error: true });
     }
+  };
+
+  RouteTool.prototype._indexWaypoints = function () {
+    for (const w of this.wps) w._ri = this._nearestRouteIndex(w.latlng);
   };
 
   RouteTool.prototype._stats = function (feat, coords) {
@@ -113,6 +188,7 @@
     };
   };
 
+  // ----- export ----------------------------------------------------------------
   RouteTool.prototype.toGPX = function () {
     const name = "FogToMaps route (" + this.profile + ")";
     const pts = this.routeCoords.map((c) => {
