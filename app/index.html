@@ -21,10 +21,8 @@
     #bar .logo { color: var(--accent); display: flex; }
     #bar .brand { font-weight: 700; letter-spacing: .04em; }
     #bar .tag { color: var(--muted); font-size: 13px; }
-    #defog { margin-left: auto; display: none; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+    #defog { margin-left: auto; display: none; font-size: 13px; color: var(--muted); }
     #defog b { color: var(--ink); }
-    #defog .track { width: 74px; height: 6px; border-radius: 3px; background: var(--line2); overflow: hidden; }
-    #defog .fill { display: block; height: 100%; background: var(--accent); width: 0; }
     #hint { margin-left: auto; color: var(--muted); font-size: 13px; }
 
     #main { display: flex; flex: 1; min-height: 0; background: var(--bg); padding: 12px; gap: 12px; }
@@ -95,6 +93,7 @@
     .statbig { font-size: 24px; font-weight: 700; }
     .statsub { color: var(--muted); font-size: 12px; }
     .statline { margin-top: 6px; font-size: 12.5px; color: var(--ink); display: flex; gap: 14px; }
+    .statline.gain { color: var(--accent); margin-top: 4px; }
     #elev svg { display: block; width: 100%; height: 78px; }
     #elev .lbl { fill: var(--muted); font-size: 10px; font-family: var(--mono); }
 
@@ -125,10 +124,7 @@
       <span class="brand" id="brandName">DEFOG</span>
       <span class="tag">// go where the fog is</span>
       <span id="hint">load your fog to begin →</span>
-      <span id="defog">
-        <span class="track"><span class="fill" id="defogFill"></span></span>
-        <span><b id="defogPct">0%</b> defogged</span>
-      </span>
+      <span id="defog"><b id="defogPct">0%</b> defogged</span>
     </div>
 
     <div id="main">
@@ -181,10 +177,8 @@
           <div class="row">Basemap
             <select id="basemap" class="grow">
               <option value="standard">Standard (OSM)</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-              <option value="terrain">Terrain</option>
-              <option value="satellite">Satellite</option>
+              <option value="cycle">Cycle (CyclOSM)</option>
+              <option value="voyager">Voyager</option>
             </select>
           </div>
         </div>
@@ -239,6 +233,14 @@
             <button id="exportGpx" class="ghost grow" disabled>GPX</button>
             <button id="exportKml" class="ghost grow" disabled>KML</button>
             <button id="openGmaps" class="ghost grow" disabled>Maps ↗</button>
+          </div>
+
+          <div class="row" style="margin-top:16px; justify-content:flex-end;">
+            <span class="muted">Units</span>
+            <span class="seg" id="unitSeg">
+              <button data-u="metric" class="active">km</button>
+              <button data-u="imperial">mi</button>
+            </span>
           </div>
         </div>
       </aside>

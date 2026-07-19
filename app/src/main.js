@@ -7,11 +7,9 @@
   map.getPane("fog").style.zIndex = 350;
 
   const BASEMAPS = {
-    standard:  { url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", max: 19, attribution: "&copy; OpenStreetMap" },
-    light:     { url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", max: 20, sub: "abcd", attribution: "&copy; OpenStreetMap &copy; CARTO" },
-    dark:      { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", max: 20, sub: "abcd", attribution: "&copy; OpenStreetMap &copy; CARTO" },
-    terrain:   { url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", max: 17, sub: "abc", attribution: "&copy; OpenTopoMap (CC-BY-SA)" },
-    satellite: { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", max: 19, attribution: "&copy; Esri" }
+    standard: { url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", max: 19, attribution: "&copy; OpenStreetMap" },
+    cycle:    { url: "https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png", max: 20, sub: "abc", attribution: "&copy; CyclOSM &copy; OpenStreetMap" },
+    voyager:  { url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", max: 20, sub: "abcd", attribution: "&copy; OpenStreetMap &copy; CARTO" }
   };
   let baseLayer = null;
   function setBasemap(key) {
@@ -85,7 +83,7 @@
   syncControls();
 
   // ---- "% defogged" of the current view ---------------------------------------
-  const hintEl = $("hint"), defogEl = $("defog"), defogFill = $("defogFill"), defogPct = $("defogPct");
+  const hintEl = $("hint"), defogEl = $("defog"), defogPct = $("defogPct");
   function updateDefog() {
     if (!fogMap.tileCount) { hintEl.style.display = ""; defogEl.style.display = "none"; return; }
     hintEl.style.display = "none"; defogEl.style.display = "flex";
@@ -105,7 +103,7 @@
       if (on) vis++;
     }
     const pct = Math.round(100 * vis / (NX * NY));
-    defogPct.textContent = pct + "%"; defogFill.style.width = pct + "%";
+    defogPct.textContent = pct + "%";
   }
   map.on("moveend", updateDefog);
   $("basemap").addEventListener("change", (e) => setBasemap(e.target.value));
@@ -158,14 +156,58 @@
   const MODE_LABEL = { trekking: "bike route", fastbike: "road bike route", "hiking-mountain": "walk", "car-fast": "car route", rail: "rail route", shortest: "direct line" };
   const IDLE = "Click the map to drop waypoints. Drag the line to bend the route; click a point to remove it.";
   let profile = "trekking";
+  const DEFOG_HALF_M = 15; // assumed half-width of the corridor Fog of World clears as you travel
+  let units = localStorage.getItem("f2m_units") || "metric";
+  let lastStats = null, lastGain = null;
+
+  const fmtDist = (km) => units === "imperial" ? (km * 0.621371).toFixed(1) + " mi" : km.toFixed(1) + " km";
+  const fmtEle = (m) => units === "imperial" ? Math.round(m * 3.28084) + " ft" : Math.round(m) + " m";
+  function fmtArea(m2) {
+    if (units === "imperial") { const mi2 = m2 / 2589988; return mi2 >= 0.01 ? mi2.toFixed(2) + " mi²" : Math.round(m2 * 10.7639) + " ft²"; }
+    const km2 = m2 / 1e6; return km2 >= 0.01 ? km2.toFixed(2) + " km²" : Math.round(m2) + " m²";
+  }
 
   function setExports(routable) {
     exportGpxBtn.disabled = !routable; exportKmlBtn.disabled = !routable;
     gmapsBtn.disabled = route.wps.length < 2;
   }
   function clearRouteInfo(msg) {
+    lastStats = null; lastGain = null;
     statsWrap.innerHTML = ""; routeHint.textContent = msg; routeHint.style.display = "";
     elevEl.innerHTML = ""; elevHead.style.display = "none";
+  }
+
+  // estimate the NEW area this route would defog: unvisited cells within the clear-corridor
+  function computeGain(coords) {
+    if (!fogMap.tileCount || coords.length < 2) return null;
+    const latC = coords[Math.floor(coords.length / 2)][1];
+    const cellM = (40075016.686 / FogParser.WORLD_CELLS) * Math.cos(latC * Math.PI / 180);
+    const r = Math.max(1, Math.round(DEFOG_HALF_M / cellM));
+    const seen = new Set(); let newCells = 0;
+    for (const p of coords) {
+      const c = FogParser.lngLatToCell(p[0], p[1]);
+      const cx0 = Math.floor(c.cx), cy0 = Math.floor(c.cy);
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        const cx = cx0 + dx, cy = cy0 + dy, key = cy * FogParser.WORLD_CELLS + cx;
+        if (seen.has(key)) continue; seen.add(key);
+        if (!fogMap.isVisitedCell(cx, cy)) newCells++;
+      }
+    }
+    const area = newCells * cellM * cellM;
+    const b = map.getBounds();
+    const vw = map.distance(b.getNorthWest(), b.getNorthEast());
+    const vh = map.distance(b.getNorthWest(), b.getSouthWest());
+    return { area, pct: vw * vh > 0 ? Math.round(1000 * area / (vw * vh)) / 10 : 0 };
+  }
+
+  function renderStats() {
+    if (!lastStats) return;
+    const s = lastStats;
+    const gain = lastGain && lastGain.area > 0
+      ? `<div class="statline gain"><span>defogs ~${fmtArea(lastGain.area)}</span><span>+${lastGain.pct}% of view</span></div>` : "";
+    statsWrap.innerHTML =
+      `<div class="card"><span class="statbig">${fmtDist(s.km)}</span> <span class="statsub">${MODE_LABEL[profile] || ""}</span>` +
+      `<div class="statline"><span>↑ ${fmtEle(s.ascent)}</span><span>↓ ${fmtEle(s.descent)}</span></div>${gain}</div>`;
   }
 
   function renderWps(list) {
@@ -206,7 +248,7 @@
     const mx = x(dists[iMax]), my = y(emax), nx = x(dists[iMin]), ny = y(emin);
     const label = (val, px, py, dot) =>
       `<circle cx="${px}" cy="${dot}" r="2" fill="#3b4ad9"/>` +
-      `<text class="lbl" x="${clamp(px)}" y="${py}" text-anchor="${anchor(px)}">${Math.round(val)} m</text>`;
+      `<text class="lbl" x="${clamp(px)}" y="${py}" text-anchor="${anchor(px)}">${fmtEle(val)}</text>`;
     elevHead.style.display = "";
     elevEl.innerHTML =
       `<svg viewBox="0 0 ${W} ${H}">` +
@@ -225,9 +267,8 @@
       if (s.loading) { routeHint.textContent = `Routing ${s.points} waypoints…`; routeHint.style.display = ""; return; }
       if (s.error) { clearRouteInfo("Routing server unreachable — showing a straight line."); setExports(route.routeCoords.length >= 2); return; }
       if (s.km == null) { clearRouteInfo(`${s.points} waypoint${s.points > 1 ? "s" : ""} — add one more to route.`); setExports(false); return; }
-      statsWrap.innerHTML =
-        `<div class="card"><span class="statbig">${s.km.toFixed(1)} km</span> <span class="statsub">${MODE_LABEL[profile] || ""}</span>` +
-        `<div class="statline"><span>↑ ${s.ascent} m</span><span>↓ ${s.descent} m</span></div></div>`;
+      lastStats = s; lastGain = computeGain(route.routeCoords);
+      renderStats();
       routeHint.style.display = "none";
       setExports(true); renderElev();
     }
@@ -241,6 +282,17 @@
   }
   modeBtns.forEach((b) => b.addEventListener("click", () => setMode(b.dataset.p)));
   setMode("trekking");
+
+  // units toggle (km / mi)
+  const unitSeg = $("unitSeg");
+  unitSeg.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.u === units);
+    b.addEventListener("click", () => {
+      units = b.dataset.u; localStorage.setItem("f2m_units", units);
+      unitSeg.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
+      renderStats(); renderElev();
+    });
+  });
 
   drawBtn.addEventListener("click", () => {
     const on = !route.active;
