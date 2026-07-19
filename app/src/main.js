@@ -3,11 +3,25 @@
   const $ = (id) => document.getElementById(id);
 
   const map = L.map("map", { center: [50, 15], zoom: 4, worldCopyJump: false });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(map);
   map.createPane("fog");
   map.getPane("fog").style.zIndex = 350;
+
+  const BASEMAPS = {
+    standard:  { url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", max: 19, attribution: "&copy; OpenStreetMap" },
+    light:     { url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", max: 20, sub: "abcd", attribution: "&copy; OpenStreetMap &copy; CARTO" },
+    dark:      { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", max: 20, sub: "abcd", attribution: "&copy; OpenStreetMap &copy; CARTO" },
+    terrain:   { url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", max: 17, sub: "abc", attribution: "&copy; OpenTopoMap (CC-BY-SA)" },
+    satellite: { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", max: 19, attribution: "&copy; Esri" }
+  };
+  let baseLayer = null;
+  function setBasemap(key) {
+    const b = BASEMAPS[key] || BASEMAPS.standard;
+    if (baseLayer) map.removeLayer(baseLayer);
+    baseLayer = L.tileLayer(b.url, { maxZoom: 19, maxNativeZoom: b.max, minZoom: 0, subdomains: b.sub || "abc", attribution: b.attribution });
+    baseLayer.addTo(map);
+    baseLayer.bringToBack();
+  }
+  setBasemap("standard");
 
   // ---- tabs -------------------------------------------------------------------
   document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => {
@@ -75,17 +89,28 @@
   function updateDefog() {
     if (!fogMap.tileCount) { hintEl.style.display = ""; defogEl.style.display = "none"; return; }
     hintEl.style.display = "none"; defogEl.style.display = "flex";
-    const b = map.getBounds(), NX = 48, NY = 32;
+    const b = map.getBounds(), NX = 64, NY = 42;
     const w = b.getWest(), e = b.getEast(), s = b.getSouth(), n = b.getNorth();
-    let vis = 0, tot = 0;
-    for (let i = 0; i < NX; i++) for (let j = 0; j < NY; j++) {
+    const g = new Uint8Array(NX * NY);
+    for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
       const c = FogParser.lngLatToCell(w + (e - w) * (i + 0.5) / NX, s + (n - s) * (j + 0.5) / NY);
-      tot++; if (fogMap.isVisitedCell(Math.floor(c.cx), Math.floor(c.cy))) vis++;
+      if (fogMap.isVisitedCell(Math.floor(c.cx), Math.floor(c.cy))) g[j * NX + i] = 1;
     }
-    const pct = tot ? Math.round(100 * vis / tot) : 0;
+    // widen by 1 sample cell so thin tracks aren't undercounted (matches the on-map fog)
+    const R = 1; let vis = 0;
+    for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
+      let on = false;
+      for (let dj = -R; dj <= R && !on; dj++) { const jj = j + dj; if (jj < 0 || jj >= NY) continue;
+        for (let di = -R; di <= R && !on; di++) { const ii = i + di; if (ii < 0 || ii >= NX) continue; if (g[jj * NX + ii]) on = true; } }
+      if (on) vis++;
+    }
+    const pct = Math.round(100 * vis / (NX * NY));
     defogPct.textContent = pct + "%"; defogFill.style.width = pct + "%";
   }
   map.on("moveend", updateDefog);
+  $("basemap").addEventListener("change", (e) => setBasemap(e.target.value));
+  // the dev-only loader needs the http.server directory listing; hide it on a real host
+  if (!/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) $("loadServer").style.display = "none";
 
   // ---- data loading -----------------------------------------------------------
   const loadStatus = $("loadStatus");
@@ -95,7 +120,7 @@
     ensureLayer();
     const b = fogMap.latLngBounds();
     if (b) map.fitBounds(b, { padding: [20, 20] });
-    setLoad(`${fogMap.tileCount} tiles loaded — nothing left your device.`);
+    setLoad(`${fogMap.tileCount} tiles loaded ✓`);
     updateDefog();
   }
   async function loadFromServer() {
@@ -167,20 +192,28 @@
     for (let i = 1; i < c.length; i++) { total += L.latLng(c[i - 1][1], c[i - 1][0]).distanceTo(L.latLng(c[i][1], c[i][0])); dists.push(total); }
     if (total < 1) { elevEl.innerHTML = ""; elevHead.style.display = "none"; return; }
     const eles = c.map((p) => p[2]);
-    let emin = Math.min.apply(null, eles), emax = Math.max.apply(null, eles);
-    if (emax - emin < 1) emax = emin + 1;
+    let iMin = 0, iMax = 0;
+    for (let i = 1; i < eles.length; i++) { if (eles[i] < eles[iMin]) iMin = i; if (eles[i] > eles[iMax]) iMax = i; }
+    let emin = eles[iMin], emax = eles[iMax], span = emax - emin < 1 ? 1 : emax - emin;
     const x = (d) => padX + (d / total) * (W - 2 * padX);
-    const y = (e) => padT + (1 - (e - emin) / (emax - emin)) * (H - padT - padB);
+    const y = (e) => padT + (1 - (e - emin) / span) * (H - padT - padB);
     let path = "M" + x(0) + "," + y(eles[0]);
     for (let i = 1; i < c.length; i++) path += " L" + x(dists[i]) + "," + y(eles[i]);
     const area = path + ` L${x(total)},${H - padB} L${x(0)},${H - padB} Z`;
+    // labels placed at the actual high/low points (SVG isn't stretched, so use px coords)
+    const clamp = (v) => Math.max(4, Math.min(W - 4, v));
+    const anchor = (px) => px < 34 ? "start" : px > W - 34 ? "end" : "middle";
+    const mx = x(dists[iMax]), my = y(emax), nx = x(dists[iMin]), ny = y(emin);
+    const label = (val, px, py, dot) =>
+      `<circle cx="${px}" cy="${dot}" r="2" fill="#3b4ad9"/>` +
+      `<text class="lbl" x="${clamp(px)}" y="${py}" text-anchor="${anchor(px)}">${Math.round(val)} m</text>`;
     elevHead.style.display = "";
     elevEl.innerHTML =
-      `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">` +
+      `<svg viewBox="0 0 ${W} ${H}">` +
       `<path d="${area}" fill="#3b4ad922"/>` +
       `<path d="${path}" fill="none" stroke="#3b4ad9" stroke-width="1.6"/>` +
-      `<text class="lbl" x="4" y="${H - 4}">${Math.round(emin)} m</text>` +
-      `<text class="lbl" x="${W - 4}" y="${H - 4}" text-anchor="end">${Math.round(emax)} m</text>` +
+      label(emax, mx, my - 5 < 9 ? my + 12 : my - 5, my) +
+      label(emin, nx, ny + 12 > H - 2 ? ny - 6 : ny + 12, ny) +
       `</svg>`;
   }
 
@@ -194,7 +227,7 @@
       if (s.km == null) { clearRouteInfo(`${s.points} waypoint${s.points > 1 ? "s" : ""} — add one more to route.`); setExports(false); return; }
       statsWrap.innerHTML =
         `<div class="card"><span class="statbig">${s.km.toFixed(1)} km</span> <span class="statsub">${MODE_LABEL[profile] || ""}</span>` +
-        `<div class="statline"><span>↑ ${s.ascent} m</span><span>↓ ${s.descent} m</span><span>~${Math.round(s.seconds / 60)} min</span></div></div>`;
+        `<div class="statline"><span>↑ ${s.ascent} m</span><span>↓ ${s.descent} m</span></div></div>`;
       routeHint.style.display = "none";
       setExports(true); renderElev();
     }
