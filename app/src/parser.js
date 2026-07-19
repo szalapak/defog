@@ -98,5 +98,21 @@
     return { lng, lat };
   }
 
-  global.FogParser = { FogMap, parseTileId, tileToLngLat, WORLD_CELLS, MAP_WIDTH, BITS_PER_TILE_EDGE };
+  // global fog-cell coords (fractional allowed) -> lng/lat
+  function cellToLngLat(cx, cy) {
+    return tileToLngLat(cx / BITS_PER_TILE_EDGE, cy / BITS_PER_TILE_EDGE);
+  }
+
+  // lng/lat -> global fog-cell coords (floats)
+  function lngLatToCell(lng, lat) {
+    const cx = (lng + 180) / 360 * WORLD_CELLS;
+    const yTile = (Math.PI - Math.asinh(Math.tan(lat * Math.PI / 180))) / (2 * Math.PI) * MAP_WIDTH;
+    const cy = yTile * BITS_PER_TILE_EDGE;
+    return { cx, cy };
+  }
+
+  global.FogParser = {
+    FogMap, parseTileId, tileToLngLat, cellToLngLat, lngLatToCell,
+    WORLD_CELLS, MAP_WIDTH, BITS_PER_TILE_EDGE
+  };
 })(window);

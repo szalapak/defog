@@ -142,5 +142,25 @@
   document.getElementById("loadServer").addEventListener("click", loadFromServer);
   document.getElementById("folder").addEventListener("change", (e) => loadFromInput(e.target.files));
 
+  // ---- export -----------------------------------------------------------------
+  const exportNote = document.getElementById("exportNote");
+  document.getElementById("exportKml").addEventListener("click", () => {
+    if (!fogMap.tileCount) { exportNote.textContent = "Load your Sync data first."; return; }
+    const target = document.getElementById("exportWhat").value;
+    exportNote.textContent = "Building export…";
+    // let the label paint before the (synchronous) build
+    setTimeout(() => {
+      // export widening is 0: the ~30 m aggregation grid already fills street width,
+      // and coarse-cell dilation would merge separate streets together.
+      const res = FogExport.toKML(fogMap, map.getBounds(), {
+        target, dilate: 0, color: style.color, alpha: style.alpha
+      });
+      FogExport.download(res.kml, `fogtomaps-${target}.kml`);
+      exportNote.textContent =
+        `Exported ${res.rects} shapes at ~${res.squareMeters} m detail` +
+        (res.cappedAt ? " (view too dense — zoom in for more detail)." : ".");
+    }, 20);
+  });
+
   setStatus('Ready. Click "Load my Sync (dev)" or pick your Sync folder.');
 })();

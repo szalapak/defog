@@ -86,6 +86,15 @@
             <input type="color" id="colorPick" value="#3a4a5a" />
           </div>
           <div class="row">Opacity <input type="range" id="alpha" min="30" max="255" value="190" style="flex:1" /></div>
+          <div class="row" style="border-top:1px solid #0002; padding-top:9px; margin-top:9px;">
+            Export view
+            <select id="exportWhat">
+              <option value="explored">Explored</option>
+              <option value="unexplored">Unexplored (gaps)</option>
+            </select>
+            <button id="exportKml">⬇ KML</button>
+          </div>
+          <div class="row muted" id="exportNote">For mapy.cz / Google My Maps. Zoom to the area first.</div>
           <div class="row">Widen paths
             <span class="stepper">
               <button id="widenMinus" class="step" title="Narrower">−</button>
@@ -103,6 +112,7 @@
   <script src="vendor/pako_inflate.min.js"></script>
   <script src="src/parser.js"></script>
   <script src="src/fogLayer.js"></script>
+  <script src="src/export.js"></script>
   <script src="src/main.js"></script>
 </body>
 </html>
