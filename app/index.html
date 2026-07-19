@@ -3,119 +3,173 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>FogToMaps — plan your defogging</title>
+  <title>Defog — go where the fog is</title>
   <link rel="stylesheet" href="vendor/leaflet.css" />
   <style>
-    html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
-    #app { display: flex; flex-direction: column; height: 100%; }
-    #bar {
-      display: flex; align-items: center; gap: 12px;
-      padding: 8px 12px; background: #1f2430; color: #eef; font-size: 14px; z-index: 1200;
+    :root {
+      --bg: #e7e9ee; --card: #ffffff; --ink: #1f2533; --muted: #8a90a0;
+      --accent: #3b4ad9; --accent-soft: #eaecfb; --label: #a06a54;
+      --line: #e4e6ec; --line2: #d3d7e0;
+      --mono: ui-monospace, "Cascadia Mono", "Cascadia Code", "SF Mono", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
     }
-    #bar .brand { font-weight: 700; }
-    #status { margin-left: auto; opacity: .8; font-size: 13px; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; font-family: var(--mono); color: var(--ink); background: var(--bg); }
+    #app { display: flex; flex-direction: column; height: 100%; }
 
-    #main { display: flex; flex: 1; min-height: 0; }
-    #map { flex: 1; }
-    #sidebar { width: 300px; flex: 0 0 300px; display: flex; flex-direction: column;
-      background: #f4f5f8; color: #1f2430; border-left: 1px solid #0002; font-size: 13px; }
+    #bar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: var(--card);
+      border-bottom: 1px solid var(--line); }
+    #bar .logo { color: var(--accent); display: flex; }
+    #bar .brand { font-weight: 700; letter-spacing: .04em; }
+    #bar .tag { color: var(--muted); font-size: 13px; }
+    #defog { margin-left: auto; display: none; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+    #defog b { color: var(--ink); }
+    #defog .track { width: 74px; height: 6px; border-radius: 3px; background: var(--line2); overflow: hidden; }
+    #defog .fill { display: block; height: 100%; background: var(--accent); width: 0; }
+    #hint { margin-left: auto; color: var(--muted); font-size: 13px; }
 
-    .tabs { display: flex; }
-    .tabs button { flex: 1; padding: 11px 8px; border: 0; background: #e1e4ec; color: #444;
-      font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; }
-    .tabs button.active { background: #f4f5f8; color: #1f2430; border-bottom-color: #3856c9; }
-    .pane { display: none; padding: 12px 14px; overflow-y: auto; }
+    #main { display: flex; flex: 1; min-height: 0; background: var(--bg); padding: 12px; gap: 12px; }
+    #map { flex: 1; border-radius: 16px; overflow: hidden; box-shadow: 0 1px 4px #0000000f; }
+    #sidebar { width: 324px; flex: 0 0 324px; display: flex; flex-direction: column; overflow: hidden;
+      background: var(--card); border-radius: 16px; box-shadow: 0 1px 4px #0000000f; }
+
+    .tabs { display: flex; border-bottom: 1px solid var(--line); }
+    .tabs button { flex: 1; padding: 14px 8px; border: 0; background: none; color: var(--muted);
+      font-family: var(--mono); font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent; }
+    .tabs button.active { color: var(--ink); font-weight: 700; border-bottom-color: var(--accent); }
+    .pane { display: none; padding: 16px; overflow-y: auto; }
     .pane.active { display: block; }
 
-    h4 { margin: 4px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; opacity: .6; }
-    .row { margin: 8px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .row label { display: inline-flex; align-items: center; gap: 4px; }
-    button.act { background: #3856c9; color: #fff; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
-    button.ghost { background: #e0e3ec; color: #1f2430; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
-    label.file { background: #2e9a78; color: #fff; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+    h4 { margin: 18px 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
+      font-weight: 600; color: var(--label); }
+    h4:first-child { margin-top: 4px; }
+    .purpose { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin: 0 0 4px; }
+    .row { margin: 9px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .grow { flex: 1; }
+
+    button, .btn { font-family: var(--mono); font-size: 13px; cursor: pointer; border-radius: 9px; }
+    .act { background: var(--accent); color: #fff; border: 0; padding: 9px 14px; }
+    .act:hover { filter: brightness(1.06); }
+    .ghost { background: #fff; color: var(--ink); border: 1px solid var(--line2); padding: 9px 14px; }
+    .ghost:hover { border-color: var(--accent); color: var(--accent); }
+    button:disabled { opacity: .45; cursor: default; filter: none; }
+    label.file { background: #fff; color: var(--ink); border: 1px solid var(--line2); border-radius: 9px; padding: 9px 14px; cursor: pointer; }
+    label.file:hover { border-color: var(--accent); color: var(--accent); }
     label.file input { display: none; }
-    button:disabled { opacity: .4; cursor: default; }
-    .muted { opacity: .7; font-size: 12px; }
-    details { margin: 8px 0; font-size: 12px; }
-    details summary { cursor: pointer; color: #3856c9; }
-    details p { margin: 6px 0; line-height: 1.45; }
+    .muted { color: var(--muted); font-size: 12px; }
+    details { margin: 8px 0; font-size: 12.5px; }
+    details summary { cursor: pointer; color: var(--accent); list-style: none; }
+    details summary::marker { content: ""; }
+    details summary::before { content: "▸ "; }
+    details[open] summary::before { content: "▾ "; }
+    details p { margin: 7px 0; line-height: 1.5; color: var(--muted); }
+    hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
 
-    .swatches { display: flex; gap: 5px; }
-    .sw { width: 20px; height: 20px; border-radius: 4px; border: 2px solid #fff; box-shadow: 0 0 0 1px #0003; cursor: pointer; }
-    .sw.active { outline: 2px solid #1f2430; }
-    input[type=range] { flex: 1; }
+    /* segmented control */
+    .seg { display: inline-flex; border: 1px solid var(--line2); border-radius: 9px; overflow: hidden; }
+    .seg button { padding: 8px 16px; border: 0; background: #fff; color: var(--ink); }
+    .seg button.active { background: var(--accent); color: #fff; }
+
+    /* swatches */
+    .swatches { display: flex; gap: 6px; align-items: center; }
+    .sw { width: 24px; height: 24px; border-radius: 6px; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line2); cursor: pointer; }
+    .sw.active { box-shadow: 0 0 0 2px var(--accent); }
+    .sw.add { display: flex; align-items: center; justify-content: center; background: #fff; color: var(--muted); font-size: 15px; }
+    #colorPick { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
+    input[type=range] { flex: 1; accent-color: var(--accent); }
     .stepper { display: inline-flex; align-items: center; gap: 8px; }
-    .stepper .step { width: 26px; height: 26px; padding: 0; font-size: 17px; line-height: 1;
-      background: #e0e3ec; color: #1f2430; border: 0; border-radius: 6px; cursor: pointer; }
-    #widenVal { min-width: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+    .stepper .step { width: 30px; height: 30px; padding: 0; font-size: 18px; line-height: 1;
+      background: #fff; color: var(--ink); border: 1px solid var(--line2); border-radius: 8px; }
+    #widenVal { min-width: 14px; text-align: center; }
 
-    .modes { display: flex; gap: 6px; }
-    .modes button { flex: 1; font-size: 18px; padding: 6px 0; background: #e6e8ef; color: #1f2430;
-      border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
-    .modes button.active { background: #fff; border-color: #3856c9; }
+    /* transport modes */
+    .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .modes button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 0;
+      background: #fff; color: var(--ink); border: 1px solid var(--line2); border-radius: 10px; font-size: 11px; }
+    .modes button svg { width: 21px; height: 21px; }
+    .modes button.active { border-color: var(--accent); color: var(--accent); }
 
-    #routeStats b { font-variant-numeric: tabular-nums; }
-    #elev { margin: 6px 0; }
-    #elev svg { display: block; width: 100%; height: 74px; background: #fff; border-radius: 6px; }
-    #elev .lbl { font-size: 11px; fill: #666; }
+    /* stats + elevation */
+    .card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 8px 0; }
+    .statbig { font-size: 24px; font-weight: 700; }
+    .statsub { color: var(--muted); font-size: 12px; }
+    .statline { margin-top: 6px; font-size: 12.5px; color: var(--ink); display: flex; gap: 14px; }
+    #elev svg { display: block; width: 100%; height: 78px; }
+    #elev .lbl { fill: var(--muted); font-size: 10px; font-family: var(--mono); }
 
     #wpList:empty { display: none; }
-    #wpList { margin: 6px 0; max-height: 168px; overflow-y: auto; }
-    .wpRow { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
-    .wpRow .n { width: 20px; height: 20px; border-radius: 50%; background: #ff2d55; color: #fff;
-      font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
-    .wpRow .co { flex: 1; font-variant-numeric: tabular-nums; opacity: .8; cursor: pointer; }
+    #wpList { margin: 6px 0; max-height: 176px; overflow-y: auto; }
+    .wpRow { display: flex; align-items: center; gap: 9px; padding: 4px 0; font-size: 12.5px; }
+    .wpRow .n { width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff;
+      font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+    .wpRow .co { flex: 1; cursor: pointer; }
     .wpRow .x { background: none; border: 0; color: #c0392b; cursor: pointer; font-size: 15px; padding: 0 4px; }
 
-    .wp { width: 18px; height: 18px; border-radius: 50%; background: #ff2d55; color: #fff;
+    .wp { width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: #fff;
       border: 2px solid #fff; box-shadow: 0 1px 4px #0006; font-size: 11px; font-weight: 700;
       display: flex; align-items: center; justify-content: center; cursor: grab; }
+
+    .leaflet-bar { border-radius: 9px !important; overflow: hidden; border: 1px solid var(--line2) !important; }
+    .leaflet-bar a { font-family: var(--mono); }
   </style>
 </head>
 <body>
   <div id="app">
     <div id="bar">
-      <span class="brand">🧭 FogToMaps</span>
-      <span id="status"></span>
+      <span class="logo" title="Defog">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/><path d="M15.5 8.5 L11 11 L8.5 15.5 L13 13 Z" fill="currentColor" stroke="none"/>
+        </svg>
+      </span>
+      <span class="brand" id="brandName">DEFOG</span>
+      <span class="tag">// go where the fog is</span>
+      <span id="hint">load your fog to begin →</span>
+      <span id="defog">
+        <span class="track"><span class="fill" id="defogFill"></span></span>
+        <span><b id="defogPct">0%</b> defogged</span>
+      </span>
     </div>
 
     <div id="main">
       <div id="map"></div>
       <aside id="sidebar">
         <div class="tabs">
-          <button id="tabFog" class="active" data-pane="fogPane">🌫️ Fog</button>
-          <button id="tabPlan" data-pane="planPane">🚴 Plan defogging</button>
+          <button id="tabFog" class="active" data-pane="fogPane">Show your fog</button>
+          <button id="tabPlan" data-pane="planPane">Plan</button>
         </div>
 
-        <!-- FOG: import + appearance -->
+        <!-- SHOW YOUR FOG -->
         <div class="pane active" id="fogPane">
+          <p class="purpose">Turn your Fog of World data into a live map, then plan routes that take you where you haven't been yet.</p>
+
           <h4>1 · Load your fog</h4>
           <div class="row">
-            <button id="loadServer" class="act">Load my Sync (dev)</button>
+            <button id="loadServer" class="act">Load my Sync</button>
             <label class="file">Pick folder…
               <input id="folder" type="file" webkitdirectory directory multiple />
             </label>
           </div>
           <details>
             <summary>Where's my Sync folder?</summary>
-            <p>Fog of World keeps a folder named <b>Sync</b> full of small files. Point the picker at that folder.</p>
+            <p>Fog of World keeps a folder named <b>Sync</b> full of small files — point the picker at it.</p>
             <p><b>Dropbox sync:</b> <code>Dropbox/Apps/Fog of World/Sync</code>.<br>
                <b>OneDrive sync:</b> the <code>Fog of World/Sync</code> folder in your OneDrive.<br>
                <b>Otherwise:</b> in Fog of World open <b>Settings → Data / Backup</b>, export a backup, and use the <b>Sync</b> folder inside it.</p>
-            <p class="muted">Everything runs on your device — your data is never uploaded.</p>
           </details>
+          <div class="muted" id="loadStatus">Runs entirely on your device — nothing is uploaded.</div>
 
           <h4>2 · Fog look</h4>
-          <div class="row">Shade:
-            <label><input type="radio" name="target" value="explored" checked /> Visited</label>
-            <label><input type="radio" name="target" value="unexplored" /> Unexplored</label>
+          <div class="row">Shade
+            <span class="seg" id="shadeSeg">
+              <button data-target="explored" class="active">Visited</button>
+              <button data-target="unexplored">Unexplored</button>
+            </span>
           </div>
           <div class="row">Colour
             <span class="swatches" id="swatches"></span>
-            <input type="color" id="colorPick" value="#3a4a5a" />
+            <input type="color" id="colorPick" value="#2d3a4a" />
           </div>
           <div class="row">Opacity <input type="range" id="alpha" min="30" max="255" value="150" /></div>
-          <div class="row">Widen paths
+          <div class="row">Widen
             <span class="stepper">
               <button id="widenMinus" class="step" title="Narrower">−</button>
               <span id="widenVal">1</span>
@@ -124,32 +178,56 @@
           </div>
         </div>
 
-        <!-- PLAN: routing -->
+        <!-- PLAN -->
         <div class="pane" id="planPane">
           <h4>Mode</h4>
           <div class="modes" id="modes">
-            <button data-p="trekking" title="Bike">🚲</button>
-            <button data-p="fastbike" title="Road bike">🚴</button>
-            <button data-p="hiking-mountain" title="Walk / hike">🥾</button>
-            <button data-p="car-fast" title="Car">🚗</button>
-            <button data-p="rail" title="Rail">🚆</button>
-            <button data-p="shortest" title="Direct line">📏</button>
+            <button data-p="trekking" title="Bike">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="17" r="3.3"/><circle cx="18.5" cy="17" r="3.3"/><path d="M5.5 17 L10 8 h4"/><path d="M9 8 L15 17"/><path d="M13.5 8 h2"/></svg>
+              <span>Bike</span>
+            </button>
+            <button data-p="fastbike" title="Road bike">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="17" r="3.3"/><circle cx="18.5" cy="17" r="3.3"/><path d="M5.5 17 L10 8 h4"/><path d="M9 8 L15 17"/><path d="M9 8 q3 -2 6 0"/></svg>
+              <span>Road</span>
+            </button>
+            <button data-p="hiking-mountain" title="Walk / hike">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="4.5" r="1.7"/><path d="M13 8 l-3 4 3 2 M13 8 l3 3 M13 14 l-1 3 -2 3 M13 14 l2 2 1 4"/></svg>
+              <span>Walk</span>
+            </button>
+            <button data-p="car-fast" title="Car">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13 l1.6-4.2 h11 l1.6 4.2"/><rect x="2.5" y="13" width="19" height="4.5" rx="1.3"/><circle cx="7" cy="17.5" r="1.3"/><circle cx="17" cy="17.5" r="1.3"/></svg>
+              <span>Car</span>
+            </button>
+            <button data-p="rail" title="Rail">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3.5" width="12" height="12.5" rx="2.5"/><path d="M6 11 h12 M9 20 l2.2-4 M15 20 l-2.2-4"/><circle cx="9.5" cy="13.4" r=".6" fill="currentColor"/><circle cx="14.5" cy="13.4" r=".6" fill="currentColor"/></svg>
+              <span>Rail</span>
+            </button>
+            <button data-p="shortest" title="Direct line">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19 L19 5" stroke-dasharray="3 3"/><circle cx="5" cy="19" r="1.7"/><circle cx="19" cy="5" r="1.7"/></svg>
+              <span>Direct</span>
+            </button>
           </div>
 
-          <div class="row" style="margin-top:12px;">
+          <div class="row" style="margin-top:14px;">
             <button id="drawToggle" class="act">Start drawing</button>
             <button id="undo" class="ghost">Undo</button>
             <button id="clear" class="ghost">Clear</button>
           </div>
-          <div class="row muted" id="routeStats">Click the map to drop waypoints. Drag the line to bend the route; click a point to remove it.</div>
+
+          <div id="statsWrap"></div>
+          <div class="muted" id="routeHint">Click the map to drop waypoints. Drag the line to bend the route; click a point to remove it.</div>
+
+          <h4 id="elevHead" style="display:none">Elevation</h4>
           <div id="elev"></div>
+
+          <h4 id="wpHead" style="display:none">Waypoints</h4>
           <div id="wpList"></div>
 
-          <h4 style="margin-top:12px;">Export</h4>
+          <h4>Export</h4>
           <div class="row">
-            <button id="exportGpx" class="act" disabled>⬇ GPX</button>
-            <button id="exportKml" class="ghost" disabled>⬇ KML</button>
-            <button id="openGmaps" class="ghost" disabled>Google Maps ↗</button>
+            <button id="exportGpx" class="ghost grow" disabled>GPX</button>
+            <button id="exportKml" class="ghost grow" disabled>KML</button>
+            <button id="openGmaps" class="ghost grow" disabled>Maps ↗</button>
           </div>
         </div>
       </aside>
