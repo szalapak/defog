@@ -8,5 +8,8 @@ Thumbs.db
 *.swp
 *~
 
+# Design scratch (mockups, screenshots)
+design/
+
 # Local-only Claude settings
 .claude/settings.local.json

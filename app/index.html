@@ -54,6 +54,8 @@
     button:disabled { opacity: .45; cursor: default; filter: none; }
     label.file { background: #fff; color: var(--ink); border: 1px solid var(--line2); border-radius: 9px; padding: 9px 14px; cursor: pointer; }
     label.file:hover { border-color: var(--accent); color: var(--accent); }
+    label.file.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    label.file.primary:hover { color: #fff; filter: brightness(1.06); }
     label.file input { display: none; }
     .muted { color: var(--muted); font-size: 12px; }
     details { margin: 8px 0; font-size: 12.5px; }
@@ -141,8 +143,7 @@
 
           <h4>1 · Load your fog</h4>
           <div class="row">
-            <button id="loadServer" class="act">Load my Sync</button>
-            <label class="file">Pick folder…
+            <label class="file primary">Pick your Sync folder…
               <input id="folder" type="file" webkitdirectory directory multiple />
             </label>
           </div>

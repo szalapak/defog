@@ -107,8 +107,6 @@
   }
   map.on("moveend", updateDefog);
   $("basemap").addEventListener("change", (e) => setBasemap(e.target.value));
-  // the dev-only loader needs the http.server directory listing; hide it on a real host
-  if (!/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) $("loadServer").style.display = "none";
 
   // ---- data loading -----------------------------------------------------------
   const loadStatus = $("loadStatus");
@@ -121,21 +119,6 @@
     setLoad(`${fogMap.tileCount} tiles loaded ✓`);
     updateDefog();
   }
-  async function loadFromServer() {
-    setLoad("Listing /Sync/ …");
-    let names;
-    try {
-      const html = await (await fetch("/Sync/")).text();
-      names = [...html.matchAll(/href="([^"?]+)"/g)].map((m) => decodeURIComponent(m[1])).filter((n) => !n.includes("/"));
-    } catch (e) { setLoad("Could not list /Sync/. Start the dev server, or use Pick folder."); return; }
-    if (!names.length) { setLoad("No files under /Sync/."); return; }
-    let ok = 0, i = 0;
-    for (const name of names) {
-      try { if (inflateToTile(name, await (await fetch("/Sync/" + encodeURIComponent(name))).arrayBuffer())) ok++; } catch (e) {}
-      if (++i % 50 === 0) setLoad(`Decoding… ${i}/${names.length}`);
-    }
-    finishLoad();
-  }
   async function loadFromInput(fileList) {
     const files = Array.from(fileList); if (!files.length) return;
     let ok = 0, i = 0;
@@ -145,7 +128,6 @@
     }
     finishLoad();
   }
-  $("loadServer").addEventListener("click", loadFromServer);
   $("folder").addEventListener("change", (e) => loadFromInput(e.target.files));
 
   // ---- route planning ---------------------------------------------------------

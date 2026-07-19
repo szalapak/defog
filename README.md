@@ -6,20 +6,21 @@ as an overlay on a real map — so you can plan routes that maximise new "defogg
 
 Everything runs **client-side**: your location data never leaves your machine.
 
-## Status
-
-Working MVP:
+## Features
 
 - Parses the Fog of World `Sync/` format (zlib-compressed tiles → visited cells).
-- Renders the fog as a canvas overlay on an OpenStreetMap basemap (Leaflet).
-- Only decodes the tiles in view, so large datasets stay responsive.
-- "Customise the look" panel: mute visited vs unexplored, desaturate / tint / darken,
-  muted colour palette, opacity, and **Widen paths** (dilation) to fatten thin tracks.
+- Renders the fog as a canvas overlay on a real basemap (OSM / CyclOSM / Voyager),
+  decoding only the tiles in view so large datasets stay responsive.
+- **Fog look:** shade visited/unexplored, colour, opacity, and **Widen** to fatten thin tracks.
+- **Live "% defogged"** of the current view in the header.
+- **Route planning** snapped to real roads via [BRouter](https://brouter.de) (bike / road /
+  walk / car / rail): draggable & line-insertable waypoints, distance + elevation profile,
+  and an estimate of the **new area a route would defog**. Export the route as GPX / KML,
+  or open it in Google Maps. km/mi units.
 
-Planned next: export the overlay (GeoJSON/KML, clipped to the current view) for import
-into **mapy.cz** / Google My Maps, where their native routing does the actual planning.
+Everything runs **client-side** — location data never leaves the browser.
 
-## Run it
+## Run it locally
 
 No build step, no Node required. From the project root:
 
@@ -27,9 +28,13 @@ No build step, no Node required. From the project root:
 python -m http.server 8000 --bind 127.0.0.1
 ```
 
-Then open <http://127.0.0.1:8000/app/index.html> in Chrome/Edge and click
-**"Load my Sync (dev)"** (reads the bundled `Sync/` folder via the dev server),
-or **"Pick Sync folder…"** to load any Fog of World `Sync` folder.
+Then open <http://127.0.0.1:8000/app/index.html> in Chrome/Edge and use
+**"Pick your Sync folder…"** to load any Fog of World `Sync` folder.
+
+## Deploy
+
+Pushing to `main` auto-deploys the `app/` folder to GitHub Pages via
+`.github/workflows/deploy.yml` (enable Pages → Source: GitHub Actions once).
 
 ## Project layout
 
