@@ -37,7 +37,13 @@
     select, input[type=range], input[type=color] { max-width: 100%; }
     .panel button { background: #3856c9; color: #fff; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
     .panel button.ghost { background: #e3e6ee; color: #1f2430; }
-    .panel button:disabled { opacity: .5; cursor: default; }
+    .panel button:disabled { opacity: .4; cursor: default; }
+    .stepper { display: inline-flex; align-items: center; gap: 8px; }
+    .stepper .step {
+      width: 26px; height: 26px; padding: 0; font-size: 17px; line-height: 1;
+      background: #e3e6ee; color: #1f2430; border-radius: 6px;
+    }
+    #widenVal { min-width: 12px; text-align: center; font-variant-numeric: tabular-nums; }
     .muted { opacity: .7; font-size: 12px; }
   </style>
 </head>
@@ -80,7 +86,13 @@
             <input type="color" id="colorPick" value="#3a4a5a" />
           </div>
           <div class="row">Opacity <input type="range" id="alpha" min="30" max="255" value="190" style="flex:1" /></div>
-          <div class="row">Widen paths <input type="range" id="dilate" min="0" max="4" value="0" style="flex:1" /></div>
+          <div class="row">Widen paths
+            <span class="stepper">
+              <button id="widenMinus" class="step" title="Narrower">−</button>
+              <span id="widenVal">0</span>
+              <button id="widenPlus" class="step" title="Wider">+</button>
+            </span>
+          </div>
         </div>
       </div>
 

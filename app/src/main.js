@@ -46,15 +46,20 @@
   const presetSel = document.getElementById("preset");
   const styleSel = document.getElementById("styleSel");
   const alpha = document.getElementById("alpha");
-  const dilate = document.getElementById("dilate");
   const colorPick = document.getElementById("colorPick");
   const swatchBox = document.getElementById("swatches");
+  const widenVal = document.getElementById("widenVal");
+  const widenMinus = document.getElementById("widenMinus");
+  const widenPlus = document.getElementById("widenPlus");
+  const WIDEN_MAX = 4;
 
   function syncControls() {
     document.querySelector(`input[name="target"][value="${style.target}"]`).checked = true;
     styleSel.value = style.style;
     alpha.value = style.alpha;
-    dilate.value = style.dilate;
+    widenVal.textContent = style.dilate;
+    widenMinus.disabled = style.dilate <= 0;
+    widenPlus.disabled = style.dilate >= WIDEN_MAX;
     colorPick.value = style.color;
     document.getElementById("colorRow").style.display = style.style === "desaturate" ? "none" : "";
     [...swatchBox.children].forEach((s) => s.classList.toggle("active", s.dataset.c === style.color));
@@ -76,7 +81,9 @@
   presetSel.addEventListener("change", () => applyStyle(Object.assign({}, PRESETS[presetSel.value])));
   styleSel.addEventListener("change", () => applyStyle({ style: styleSel.value }));
   alpha.addEventListener("input", () => applyStyle({ alpha: parseInt(alpha.value, 10) }));
-  dilate.addEventListener("input", () => applyStyle({ dilate: parseInt(dilate.value, 10) }));
+  const stepWiden = (d) => applyStyle({ dilate: Math.max(0, Math.min(WIDEN_MAX, style.dilate + d)) });
+  widenMinus.addEventListener("click", () => stepWiden(-1));
+  widenPlus.addEventListener("click", () => stepWiden(1));
   colorPick.addEventListener("input", () => applyStyle({ color: colorPick.value }));
   document.querySelectorAll('input[name="target"]').forEach((r) =>
     r.addEventListener("change", () => applyStyle({ target: r.value })));
