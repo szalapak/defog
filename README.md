@@ -4,7 +4,8 @@ A small, browser-based tool that reads your **[Fog of World](https://fogofworld.
 sync data and renders where you've been (and, more usefully, where you *haven't*)
 as an overlay on a real map — so you can plan routes that maximise new "defogging".
 
-Everything runs **client-side**: your location data never leaves your machine.
+Your **Fog of World data is read and rendered entirely in your browser** — it is never
+uploaded anywhere.
 
 **→ Open the app: <https://szalapak.github.io/defog/>**
 
@@ -20,13 +21,21 @@ Everything runs **client-side**: your location data never leaves your machine.
   and an estimate of the **new area a route would defog**. Export the route as GPX / KML,
   or open it in Google Maps. km/mi units.
 
-Everything runs **client-side** — location data never leaves the browser.
+## Privacy
+
+Your Fog of World data is parsed and drawn **entirely in your browser** — it is never sent
+to any server. Two features do make outbound requests, and only with the coordinates needed
+for that feature (never your fog data): **route planning** sends your waypoints to the public
+[BRouter](https://brouter.de) server to snap them to roads, and **"Maps ↗"** opens your
+waypoints in Google Maps. As with any web map, basemap tiles are fetched from their providers
+(OpenStreetMap / CARTO / CyclOSM), which reveals the map area you're viewing to them.
 
 ## Use it
 
 Open **<https://szalapak.github.io/defog/>** in Chrome/Edge and click
-**"Pick your Sync folder…"** to load any Fog of World `Sync` folder. Nothing is
-uploaded — the folder is read and rendered entirely in your browser.
+**"Pick your Sync folder…"** to load any Fog of World `Sync` folder. The folder is read and
+rendered entirely in your browser — nothing is uploaded. (See **Privacy** above for the two
+route features that send waypoint coordinates to a routing/maps server.)
 
 ## Deploy
 
