@@ -113,6 +113,37 @@
 
     .leaflet-bar { border-radius: 9px !important; overflow: hidden; border: 1px solid var(--line2) !important; }
     .leaflet-bar a { font-family: var(--mono); }
+
+    /* grab-handle for the mobile bottom sheet (hidden on desktop) */
+    .grabber { display: none; width: 100%; border: 0; background: var(--card);
+      padding: 9px 0 5px; border-radius: 18px 18px 0 0; cursor: pointer; }
+    .grabber span { display: block; width: 40px; height: 5px; border-radius: 3px;
+      background: var(--line2); margin: 0 auto; }
+
+    /* ---- mobile: map goes full-bleed, sidebar becomes a bottom sheet ---- */
+    @media (max-width: 720px) {
+      #bar { padding: 10px 14px; gap: 8px; }
+      #bar .tag { display: none; }
+      #main { padding: 0; gap: 0; position: relative; }
+      #map { border-radius: 0; box-shadow: none; }
+
+      #sidebar {
+        --peek: 100px;
+        position: absolute; left: 0; right: 0; bottom: 0;
+        width: auto; flex: none;
+        height: 68vh; height: 68svh;
+        border-radius: 18px 18px 0 0;
+        box-shadow: 0 -3px 18px #0000002e;
+        transform: translateY(calc(100% - var(--peek)));
+        transition: transform .28s cubic-bezier(.4, 0, .2, 1);
+        z-index: 600;
+      }
+      #sidebar.open { transform: translateY(0); }
+
+      .grabber { display: block; }
+      .pane.active { flex: 1 1 auto; min-height: 0; }
+      .tabs button { padding: 15px 8px; }
+    }
   </style>
 </head>
 <body>
@@ -132,6 +163,7 @@
     <div id="main">
       <div id="map"></div>
       <aside id="sidebar">
+        <button class="grabber" id="grabber" aria-label="Expand or collapse panel"><span></span></button>
         <div class="tabs">
           <button id="tabFog" class="active" data-pane="fogPane">Show your fog</button>
           <button id="tabPlan" data-pane="planPane">Plan</button>

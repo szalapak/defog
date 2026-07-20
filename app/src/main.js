@@ -22,10 +22,14 @@
   setBasemap("standard");
 
   // ---- tabs -------------------------------------------------------------------
+  const sidebar = document.getElementById("sidebar");
   document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
     document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("active", p.id === b.dataset.pane));
+    sidebar.classList.add("open"); // mobile bottom sheet: tapping a tab unfurls the panel (no-op on desktop)
   }));
+  // grab-handle toggles the bottom sheet open/collapsed on mobile
+  document.getElementById("grabber").addEventListener("click", () => sidebar.classList.toggle("open"));
 
   // ---- fog layer + appearance -------------------------------------------------
   const fogMap = new FogParser.FogMap();
