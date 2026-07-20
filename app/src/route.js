@@ -16,9 +16,16 @@
     this.profile = opts.profile || "trekking";
     this.onChange = opts.onChange || null;       // stats
     this.onWaypoints = opts.onWaypoints || null; // waypoint list changed
+    this.isNew = opts.isNew || null;         // (lon,lat) -> true if the point is new ground
+    this.fogReady = opts.fogReady || null;   // () -> is fog data loaded?
     this.wps = [];            // { marker, latlng, _ri }
     this.routeCoords = [];    // [[lon,lat,ele], ...] from the last successful route
+    // One-colour base line (waypoint-only / drag preview / no-fog fallback), plus two
+    // fog-aware overlays: solid red where the route breaks new ground, dashed ("hatched")
+    // red where you've already defogged.
     this.line = L.polyline([], { color: "#ff2d55", weight: 4, opacity: 0.95 }).addTo(map);
+    this.segNew = L.polyline([], { color: "#ff2d55", weight: 5, opacity: 0.95 }).addTo(map);
+    this.segOld = L.polyline([], { color: "#ff2d55", weight: 3.5, opacity: 0.85, dashArray: "2 8", lineCap: "round" }).addTo(map);
     this.active = false;
     this._reqId = 0;
     this._suppressClick = false;
@@ -27,7 +34,7 @@
       if (this._suppressClick) { this._suppressClick = false; return; }
       this.add(e.latlng);
     };
-    this.line.on("mousedown", (e) => this._grabLine(e));
+    [this.line, this.segNew, this.segOld].forEach((l) => l.on("mousedown", (e) => this._grabLine(e)));
   }
 
   RouteTool.prototype.setActive = function (on) {
@@ -77,8 +84,34 @@
     this.wps = [];
     this.routeCoords = [];
     this.line.setLatLngs([]);
+    this._clearSegs();
     this._emitWps();
     this._emit(null);
+  };
+
+  RouteTool.prototype._clearSegs = function () { this.segNew.setLatLngs([]); this.segOld.setLatLngs([]); };
+
+  // Draw the routed line. With fog loaded, split it into new-ground vs already-defogged runs
+  // (two red styles); otherwise fall back to the single base line.
+  RouteTool.prototype._renderLine = function (coords) {
+    if (!(this.isNew && this.fogReady && this.fogReady())) {
+      this._clearSegs();
+      this.line.setLatLngs(coords.map((c) => [c[1], c[0]]));
+      return;
+    }
+    const newRuns = [], oldRuns = [];
+    let cur = null, run = null;
+    for (let i = 0; i < coords.length - 1; i++) {
+      const a = coords[i], b = coords[i + 1];
+      const isNew = this.isNew((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+      if (cur === null) { cur = isNew; run = [[a[1], a[0]]]; }
+      else if (isNew !== cur) { (cur ? newRuns : oldRuns).push(run); cur = isNew; run = [[a[1], a[0]]]; }
+      run.push([b[1], b[0]]);
+    }
+    if (run) (cur ? newRuns : oldRuns).push(run);
+    this.line.setLatLngs([]);
+    this.segNew.setLatLngs(newRuns);
+    this.segOld.setLatLngs(oldRuns);
   };
 
   RouteTool.prototype._relabel = function () {
@@ -128,6 +161,7 @@
     const wp = this._insertAt(this._insertionIndex(e.latlng), e.latlng);
     this._emitWps();
     const map = this.map;
+    this._clearSegs(); // show the single base line while dragging; segments redraw on mouseup
     map.dragging.disable();
     const move = (ev) => { wp.latlng = ev.latlng; wp.marker.setLatLng(ev.latlng); this.line.setLatLngs(this.wps.map((w) => w.latlng)); };
     const up = () => {
@@ -142,6 +176,7 @@
   RouteTool.prototype._recalc = async function () {
     if (this.wps.length < 2) {
       this.routeCoords = [];
+      this._clearSegs();
       this.line.setLatLngs(this.wps.map((w) => w.latlng));
       this._emit(this.wps.length ? { points: this.wps.length } : null);
       return;
@@ -158,12 +193,13 @@
       const feat = gj.features[0];
       const coords = feat.geometry.coordinates;
       this.routeCoords = coords;
-      this.line.setLatLngs(coords.map((c) => [c[1], c[0]]));
+      this._renderLine(coords);
       this._indexWaypoints();
       this._emit(Object.assign({ points: this.wps.length }, this._stats(feat, coords)));
     } catch (e) {
       if (reqId !== this._reqId) return;
       this.routeCoords = this.wps.map((w) => [w.latlng.lng, w.latlng.lat]);
+      this._clearSegs();
       this.line.setLatLngs(this.wps.map((w) => w.latlng));
       this._emit({ points: this.wps.length, error: true });
     }

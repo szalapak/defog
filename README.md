@@ -6,6 +6,8 @@ as an overlay on a real map — so you can plan routes that maximise new "defogg
 
 Everything runs **client-side**: your location data never leaves your machine.
 
+**→ Open the app: <https://szalapak.github.io/defog/>**
+
 ## Features
 
 - Parses the Fog of World `Sync/` format (zlib-compressed tiles → visited cells).
@@ -20,16 +22,11 @@ Everything runs **client-side**: your location data never leaves your machine.
 
 Everything runs **client-side** — location data never leaves the browser.
 
-## Run it locally
+## Use it
 
-No build step, no Node required. From the project root:
-
-```sh
-python -m http.server 8000 --bind 127.0.0.1
-```
-
-Then open <http://127.0.0.1:8000/app/index.html> in Chrome/Edge and use
-**"Pick your Sync folder…"** to load any Fog of World `Sync` folder.
+Open **<https://szalapak.github.io/defog/>** in Chrome/Edge and click
+**"Pick your Sync folder…"** to load any Fog of World `Sync` folder. Nothing is
+uploaded — the folder is read and rendered entirely in your browser.
 
 ## Deploy
 

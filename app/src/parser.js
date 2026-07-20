@@ -19,6 +19,10 @@
   const BITS_PER_TILE_EDGE = TILE_WIDTH * BITMAP_WIDTH; // 8192 = 2^13
   const WORLD_CELLS = MAP_WIDTH * BITS_PER_TILE_EDGE;   // 4194304 = 2^22
 
+  // Set-bits-per-byte lookup, for popcounting bitmaps quickly.
+  const POPCNT = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) POPCNT[i] = (i & 1) + POPCNT[i >> 1];
+
   function parseTileId(filename) {
     const core = filename.slice(4, -2);
     let id = 0;
@@ -47,6 +51,48 @@
       const start = TILE_HEADER_SIZE + (idx - 1) * BLOCK_SIZE;
       const byte = this.data[start + (bitX >> 3) + bitY * 8];
       return (byte & (1 << (7 - (bitX & 7)))) !== 0;
+    }
+
+    // Total defogged cells in the whole tile (popcount every present block), cached.
+    totalVisited() {
+      if (this._tv != null) return this._tv;
+      let c = 0;
+      for (let i = 0; i < TILE_HEADER_LEN; i++) {
+        const idx = this.header[i];
+        if (idx === 0) continue;
+        const start = TILE_HEADER_SIZE + (idx - 1) * BLOCK_SIZE;
+        for (let k = 0; k < BLOCK_BITMAP_SIZE; k++) c += POPCNT[this.data[start + k]];
+      }
+      return (this._tv = c);
+    }
+
+    // Count defogged cells in local cell rect [lx0,lx1) x [ly0,ly1), clamped to the tile.
+    countVisited(lx0, ly0, lx1, ly1) {
+      lx0 = Math.max(0, lx0); ly0 = Math.max(0, ly0);
+      lx1 = Math.min(BITS_PER_TILE_EDGE, lx1); ly1 = Math.min(BITS_PER_TILE_EDGE, ly1);
+      if (lx1 <= lx0 || ly1 <= ly0) return 0;
+      if (lx0 === 0 && ly0 === 0 && lx1 === BITS_PER_TILE_EDGE && ly1 === BITS_PER_TILE_EDGE) return this.totalVisited();
+      const bx0 = lx0 >> 6, bx1 = (lx1 - 1) >> 6, by0 = ly0 >> 6, by1 = (ly1 - 1) >> 6;
+      let count = 0;
+      for (let by = by0; by <= by1; by++) {
+        for (let bx = bx0; bx <= bx1; bx++) {
+          const idx = this.header[by * TILE_WIDTH + bx];
+          if (idx === 0) continue;
+          const start = TILE_HEADER_SIZE + (idx - 1) * BLOCK_SIZE;
+          const cbx = bx << 6, cby = by << 6;
+          const x0 = Math.max(lx0, cbx) - cbx, x1 = Math.min(lx1, cbx + 64) - cbx;
+          const y0 = Math.max(ly0, cby) - cby, y1 = Math.min(ly1, cby + 64) - cby;
+          if (x0 === 0 && x1 === 64) {
+            for (let bitY = y0; bitY < y1; bitY++) { const r = start + bitY * 8; for (let k = 0; k < 8; k++) count += POPCNT[this.data[r + k]]; }
+          } else {
+            for (let bitY = y0; bitY < y1; bitY++) {
+              const r = start + bitY * 8;
+              for (let bitX = x0; bitX < x1; bitX++) if (this.data[r + (bitX >> 3)] & (1 << (7 - (bitX & 7)))) count++;
+            }
+          }
+        }
+      }
+      return count;
     }
   }
 
@@ -78,6 +124,24 @@
       if (!t) return false;
       const lx = cx & 8191, ly = cy & 8191;
       return t.isVisited(lx >> 6, ly >> 6, lx & 63, ly & 63);
+    }
+
+    // Count defogged cells whose global coords fall in [cx0,cx1) x [cy0,cy1).
+    countVisitedInCellRect(cx0, cy0, cx1, cy1) {
+      cx0 = Math.max(0, Math.floor(cx0)); cy0 = Math.max(0, Math.floor(cy0));
+      cx1 = Math.min(WORLD_CELLS, Math.ceil(cx1)); cy1 = Math.min(WORLD_CELLS, Math.ceil(cy1));
+      if (cx1 <= cx0 || cy1 <= cy0) return 0;
+      const tx0 = cx0 >> 13, tx1 = (cx1 - 1) >> 13, ty0 = cy0 >> 13, ty1 = (cy1 - 1) >> 13;
+      let count = 0;
+      for (let ty = ty0; ty <= ty1; ty++) {
+        for (let tx = tx0; tx <= tx1; tx++) {
+          const t = this.tiles.get(this._key(tx, ty));
+          if (!t) continue;
+          const baseX = tx << 13, baseY = ty << 13;
+          count += t.countVisited(cx0 - baseX, cy0 - baseY, cx1 - baseX, cy1 - baseY);
+        }
+      }
+      return count;
     }
 
     // Lat/lng bounding box of loaded data, as [[south,west],[north,east]].

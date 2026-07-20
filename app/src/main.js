@@ -30,7 +30,7 @@
   // ---- fog layer + appearance -------------------------------------------------
   const fogMap = new FogParser.FogMap();
   let fogLayer = null;
-  const SWATCHES = ["#2d3a4a", "#7d5a5a", "#6a6f8a", "#c19a4b"];
+  const SWATCHES = ["#2d3a4a", "#40639c", "#68509f", "#6a6f8a"]; // slate · blue · purple · blue-grey
   const WIDEN_MAX = 4;
 
   const saved = JSON.parse(localStorage.getItem("f2m_style") || "null");
@@ -84,26 +84,27 @@
 
   // ---- "% defogged" of the current view ---------------------------------------
   const hintEl = $("hint"), defogEl = $("defog"), defogPct = $("defogPct");
+  // Always show two significant figures, however small the value — so a whole-world view
+  // reads e.g. "0.00000056%" instead of collapsing to "0%". (0 stays "0%", 100 stays "100%".)
+  function fmtPct(p) {
+    if (!(p > 0)) return "0%";
+    if (p >= 100) return "100%";
+    const decimals = Math.max(0, 1 - Math.floor(Math.log10(p)));
+    return p.toFixed(decimals) + "%";
+  }
   function updateDefog() {
     if (!fogMap.tileCount) { hintEl.style.display = ""; defogEl.style.display = "none"; return; }
     hintEl.style.display = "none"; defogEl.style.display = "flex";
-    const b = map.getBounds(), NX = 64, NY = 42;
-    const w = b.getWest(), e = b.getEast(), s = b.getSouth(), n = b.getNorth();
-    const g = new Uint8Array(NX * NY);
-    for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
-      const c = FogParser.lngLatToCell(w + (e - w) * (i + 0.5) / NX, s + (n - s) * (j + 0.5) / NY);
-      if (fogMap.isVisitedCell(Math.floor(c.cx), Math.floor(c.cy))) g[j * NX + i] = 1;
-    }
-    // widen by 1 sample cell so thin tracks aren't undercounted (matches the on-map fog)
-    const R = 1; let vis = 0;
-    for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
-      let on = false;
-      for (let dj = -R; dj <= R && !on; dj++) { const jj = j + dj; if (jj < 0 || jj >= NY) continue;
-        for (let di = -R; di <= R && !on; di++) { const ii = i + di; if (ii < 0 || ii >= NX) continue; if (g[jj * NX + ii]) on = true; } }
-      if (on) vis++;
-    }
-    const pct = Math.round(100 * vis / (NX * NY));
-    defogPct.textContent = pct + "%";
+    // Exact count of defogged cells in the visible Mercator rectangle / total cells in it.
+    // (Counting real cells — not a sampled grid — so tiny world-view fractions stay accurate.)
+    const b = map.getBounds(), WC = FogParser.WORLD_CELLS;
+    const nw = FogParser.lngLatToCell(b.getWest(), b.getNorth());
+    const se = FogParser.lngLatToCell(b.getEast(), b.getSouth());
+    const cx0 = Math.max(0, nw.cx), cy0 = Math.max(0, nw.cy);
+    const cx1 = Math.min(WC, se.cx), cy1 = Math.min(WC, se.cy);
+    const total = Math.max(0, cx1 - cx0) * Math.max(0, cy1 - cy0);
+    const visited = total > 0 ? fogMap.countVisitedInCellRect(cx0, cy0, cx1, cy1) : 0;
+    defogPct.textContent = fmtPct(total > 0 ? 100 * visited / total : 0);
   }
   map.on("moveend", updateDefog);
   $("basemap").addEventListener("change", (e) => setBasemap(e.target.value));
@@ -159,11 +160,24 @@
     elevEl.innerHTML = ""; elevHead.style.display = "none";
   }
 
-  // estimate the NEW area this route would defog: unvisited cells within the clear-corridor
+  const cellMetersAt = (lat) => (40075016.686 / FogParser.WORLD_CELLS) * Math.cos(lat * Math.PI / 180);
+
+  // Is this point on genuinely new ground? True only if NO already-visited cell sits within
+  // the ~DEFOG_HALF_M corridor — so weaving a cell off a road you've done doesn't read as new.
+  function cellIsNew(lon, lat) {
+    const r = Math.max(1, Math.round(DEFOG_HALF_M / cellMetersAt(lat)));
+    const c = FogParser.lngLatToCell(lon, lat);
+    const cx0 = Math.floor(c.cx), cy0 = Math.floor(c.cy);
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++)
+      if (fogMap.isVisitedCell(cx0 + dx, cy0 + dy)) return false;
+    return true;
+  }
+
+  // What this route would defog: new area (cells in the clear-corridor) + the share of the
+  // route's LENGTH that runs through never-visited ground.
   function computeGain(coords) {
     if (!fogMap.tileCount || coords.length < 2) return null;
-    const latC = coords[Math.floor(coords.length / 2)][1];
-    const cellM = (40075016.686 / FogParser.WORLD_CELLS) * Math.cos(latC * Math.PI / 180);
+    const cellM = cellMetersAt(coords[Math.floor(coords.length / 2)][1]);
     const r = Math.max(1, Math.round(DEFOG_HALF_M / cellM));
     const seen = new Set(); let newCells = 0;
     for (const p of coords) {
@@ -175,18 +189,20 @@
         if (!fogMap.isVisitedCell(cx, cy)) newCells++;
       }
     }
-    const area = newCells * cellM * cellM;
-    const b = map.getBounds();
-    const vw = map.distance(b.getNorthWest(), b.getNorthEast());
-    const vh = map.distance(b.getNorthWest(), b.getSouthWest());
-    return { area, pct: vw * vh > 0 ? Math.round(1000 * area / (vw * vh)) / 10 : 0 };
+    let total = 0, newLen = 0;
+    for (let i = 1; i < coords.length; i++) {
+      const a = L.latLng(coords[i - 1][1], coords[i - 1][0]), b = L.latLng(coords[i][1], coords[i][0]);
+      const d = a.distanceTo(b); total += d;
+      if (cellIsNew((coords[i - 1][0] + coords[i][0]) / 2, (coords[i - 1][1] + coords[i][1]) / 2)) newLen += d;
+    }
+    return { area: newCells * cellM * cellM, newPct: total > 0 ? 100 * newLen / total : 0 };
   }
 
   function renderStats() {
     if (!lastStats) return;
     const s = lastStats;
     const gain = lastGain && lastGain.area > 0
-      ? `<div class="statline gain"><span>defogs ~${fmtArea(lastGain.area)}</span><span>+${lastGain.pct}% of view</span></div>` : "";
+      ? `<div class="statline gain"><span>defogs ~${fmtArea(lastGain.area)}</span><span>${fmtPct(lastGain.newPct)} new ground</span></div>` : "";
     statsWrap.innerHTML =
       `<div class="card"><span class="statbig">${fmtDist(s.km)}</span> <span class="statsub">${MODE_LABEL[profile] || ""}</span>` +
       `<div class="statline"><span>↑ ${fmtEle(s.ascent)}</span><span>↓ ${fmtEle(s.descent)}</span></div>${gain}</div>`;
@@ -243,6 +259,8 @@
 
   const route = new RouteTool(map, {
     profile,
+    isNew: cellIsNew,                       // colour the path: new ground vs already defogged
+    fogReady: () => fogMap.tileCount > 0,
     onWaypoints: renderWps,
     onChange: (s) => {
       if (!s) { clearRouteInfo(IDLE); setExports(false); return; }
