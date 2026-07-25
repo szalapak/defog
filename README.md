@@ -1,8 +1,7 @@
-# FogToMaps
+# Defog
 
 A small, browser-based tool that reads your **[Fog of World](https://fogofworld.app/)**
-sync data and renders where you've been (and, more usefully, where you *haven't*)
-as an overlay on a real map — so you can plan routes that maximise new "defogging".
+sync data and renders where you've been as an overlay on a real map — so you can plan routes that maximise new defogging.
 
 Your **Fog of World data is read and rendered entirely in your browser** — it is never
 uploaded anywhere.
@@ -32,15 +31,8 @@ waypoints in Google Maps. As with any web map, basemap tiles are fetched from th
 
 ## Use it
 
-Open **<https://szalapak.github.io/defog/>** in Chrome/Edge and click
-**"Pick your Sync folder…"** to load any Fog of World `Sync` folder. The folder is read and
-rendered entirely in your browser — nothing is uploaded. (See **Privacy** above for the two
-route features that send waypoint coordinates to a routing/maps server.)
-
-## Deploy
-
-Pushing to `main` auto-deploys the `app/` folder to GitHub Pages via
-`.github/workflows/deploy.yml` (enable Pages → Source: GitHub Actions once).
+Open **<https://szalapak.github.io/defog/>** in your browser and click
+**"Pick your Sync folder…"** to load any Fog of World `Sync` folder. 
 
 ## Project layout
 
@@ -51,7 +43,7 @@ app/
   src/fogLayer.js   Leaflet GridLayer that paints the fog, with the look/blend/widen options
   src/main.js       wiring: data loading, style controls, persistence
   vendor/           Leaflet + pako (zlib), vendored so there's nothing to install
-Sync/               your personal Fog of World data (gitignored — not committed)
+Sync/               
 ```
 
 ## Data format (credits)
