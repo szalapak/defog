@@ -360,7 +360,10 @@
       return;
     }
     if (s.empty) {
-      sugResults.innerHTML = `<div class="muted" style="margin-top:10px">No loops landed within ±${s.bufferPct}% of ${fmtDist(s.targetKm)} — try a bigger buffer or a different distance.</div>`;
+      sugResults.innerHTML = `<div class="muted" style="margin-top:10px">${
+        s.reason === "defogged"
+          ? "Nothing left to defog around here — every candidate route runs through ground you've already covered. Try a different area" + (s.targetKm != null ? " or a longer distance." : " or a bigger buffer.")
+          : `No loops landed within ±${s.bufferPct}% of ${fmtDist(s.targetKm)} — try a bigger buffer or a different distance.`}</div>`;
       return;
     }
     const isLoop = s.targetKm != null;
@@ -402,7 +405,7 @@
       if (route.active) { route.setActive(false); drawBtn.textContent = "Start drawing"; drawBtn.style.background = ""; }
       suggest.setActive(true);
       syncSug();
-      if (suggest.pointCount() < 2) sidebar.classList.remove("open"); // mobile: reveal the map to tap points
+      if (suggest.pointCount() < suggest.pointsNeeded()) sidebar.classList.remove("open"); // mobile: reveal the map to tap points
     } else {
       suggest.setActive(false);
     }

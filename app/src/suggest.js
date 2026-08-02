@@ -184,13 +184,16 @@
     if (runId !== this._runId) return;
     const emit = (s) => { if (this.onResults) this.onResults(s); };
     if (!cands.length) { emit(Object.assign({ empty: true }, extra)); return; }
-    const scored = [];
+    let scored = [];
     for (const c of cands) {
       const s = sig(c.r.coords);
       if (scored.some((o) => sameSig(o.s, s))) continue;
       const gain = this.computeGain(c.r.coords) || { area: 0, newPct: 0 };
       scored.push(Object.assign({ s, gain }, c));
     }
+    // a route that breaks <1% new ground isn't a suggestion, it's a re-walk
+    scored = scored.filter((c) => c.gain.area > 0 && c.gain.newPct >= 1);
+    if (!scored.length) { emit(Object.assign({ empty: true, reason: "defogged" }, extra)); return; }
     scored.sort((x, y) => y.gain.area - x.gain.area);
     this.results = scored.slice(0, 3);
 
@@ -325,16 +328,44 @@
     return picked;
   };
 
-  // Equilateral-ish triangle S → v1 → v2 → S out along a bearing. side is the triangle
-  // edge in metres; vias sit at bearing ±30° so the straight perimeter is 3·side.
-  SuggestTool.prototype._loopVias = function (S, bearingDeg, side) {
+  // Square-ish loop S → v1 → v2 → v3 → S out along a bearing (S and three vias as the
+  // corners, edge a metres, straight perimeter 4a). Benchmarked against 2-via triangles:
+  // three vias give BRouter much less room to fold the loop into out-and-back spurs
+  // (mean retraced length 8% vs 25%) and hit the distance tolerance more often.
+  SuggestTool.prototype._loopVias = function (S, bearingDeg, a) {
     const { kx, ky } = metresPerDeg(S.lat);
-    const at = (thDeg) => {
+    const at = (thDeg, m) => {
       const th = thDeg * Math.PI / 180;
-      return L.latLng(S.lat + (Math.cos(th) * side) / ky, S.lng + (Math.sin(th) * side) / kx);
+      return L.latLng(S.lat + (Math.cos(th) * m) / ky, S.lng + (Math.sin(th) * m) / kx);
     };
-    return [at(bearingDeg - 30), at(bearingDeg + 30)];
+    return [at(bearingDeg - 45, a), at(bearingDeg, a * Math.SQRT2), at(bearingDeg + 45, a)];
   };
+
+  // Share of the route's length that runs within ~25 m of another, path-distant part of
+  // itself — high values mean out-and-back spurs rather than a proper loop.
+  function overlapFrac(coords) {
+    const { kx, ky } = metresPerDeg(coords.length ? coords[0][1] : 0);
+    const d2 = (p, q) => { const dx = (p.x - q.x), dy = (p.y - q.y); return dx * dx + dy * dy; };
+    const pts = [];
+    let acc = 0;
+    for (let i = 1; i < coords.length; i++) {
+      const ax = coords[i - 1][0] * kx, ay = coords[i - 1][1] * ky;
+      const bx = coords[i][0] * kx, by = coords[i][1] * ky;
+      const len = Math.hypot(bx - ax, by - ay);
+      pts.push({ x: (ax + bx) / 2, y: (ay + by) / 2, len, at: acc + len / 2 });
+      acc += len;
+    }
+    let overlap = 0, total = 0;
+    for (const p of pts) {
+      total += p.len;
+      for (const q of pts) {
+        const along = Math.abs(p.at - q.at);
+        if (Math.min(along, acc - along) < 250) continue; // path-adjacent (loop-circular)
+        if (d2(p, q) < 25 * 25) { overlap += p.len; break; }
+      }
+    }
+    return total ? overlap / total : 0;
+  }
 
   SuggestTool.prototype._suggestLoop = async function (profile, distM, buffer) {
     if (!this.a || !distM) return;
@@ -350,25 +381,29 @@
     const total = bearings.length;
     emit({ loading: true, phase: "loops", done: 0, total });
 
-    // 3.75: roads inflate the straight triangle by ~25%, so start with perimeter = D/1.25.
-    // If the routed loop misses the tolerance, retry once with a proportionally scaled triangle.
+    // 5: roads inflate the straight square (4a) by ~25%, so start with perimeter = D/1.25.
+    // If the routed loop misses the tolerance, retry once with a proportionally scaled square.
+    const loopWps = (vias) => [S].concat(vias, [S]);
     const jobs = bearings.map((bearing) => async () => {
-      let side = distM / 3.75;
-      let vias = this._loopVias(S, bearing, side);
-      let r = await this._route([S, vias[0], vias[1], S], profile, 0);
+      let a = distM / 5;
+      let vias = this._loopVias(S, bearing, a);
+      let r = await this._route(loopWps(vias), profile, 0);
       if (r && r.lenM && !inTol(r.lenM)) {
-        side *= Math.min(2.5, Math.max(0.4, distM / r.lenM));
-        const vias2 = this._loopVias(S, bearing, side);
-        const r2 = await this._route([S, vias2[0], vias2[1], S], profile, 0);
+        a *= Math.min(2.5, Math.max(0.4, distM / r.lenM));
+        const vias2 = this._loopVias(S, bearing, a);
+        const r2 = await this._route(loopWps(vias2), profile, 0);
         if (r2 && r2.lenM && Math.abs(r2.lenM - distM) < Math.abs(r.lenM - distM)) { r = r2; vias = vias2; }
       }
       if (!r || !r.lenM || !inTol(r.lenM)) return null;
-      return { r, adoptWps: [S, vias[0], vias[1], S] };
+      return { r, adoptWps: loopWps(vias), overlap: overlapFrac(r.coords) };
     });
 
     const found = await this._pool(jobs, stale, (done) => emit({ loading: true, phase: "loops", done, total }));
     if (stale()) return;
-    this._finish(runId, found, { targetKm: distM / 1000, bufferPct });
+    // prefer proper loops: drop candidates that retrace >30% of themselves, unless that
+    // would leave nothing to show
+    const clean = found.filter((c) => c.overlap <= 0.3);
+    this._finish(runId, clean.length ? clean : found, { targetKm: distM / 1000, bufferPct });
   };
 
   global.SuggestTool = SuggestTool;
