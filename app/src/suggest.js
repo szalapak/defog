@@ -205,18 +205,22 @@
     if (runId !== this._runId) return;
     const emit = (s) => { if (this.onResults) this.onResults(s); };
     if (!cands.length) { emit(Object.assign({ empty: true }, extra)); return; }
-    let scored = [];
-    for (const c of cands) {
-      const s = sig(c.r.coords);
-      if (scored.some((o) => sameSig(o.s, s))) continue;
-      const gain = this.computeGain(c.r.coords) || { area: 0, newPct: 0 };
-      scored.push(Object.assign({ s, gain }, c));
-    }
+    // Score first, rank, THEN dedupe — near-identical routes must collapse onto the
+    // best-gaining of the pair, not whichever happened to be scored first.
+    let scored = cands.map((c) => Object.assign({
+      s: sig(c.r.coords),
+      gain: this.computeGain(c.r.coords) || { area: 0, newPct: 0 }
+    }, c));
     // a route that breaks <1% new ground isn't a suggestion, it's a re-walk
     scored = scored.filter((c) => c.gain.area > 0 && c.gain.newPct >= 1);
     if (!scored.length) { emit(Object.assign({ empty: true, reason: "defogged" }, extra)); return; }
     scored.sort((x, y) => y.gain.area - x.gain.area);
-    this.results = scored.slice(0, 3);
+    const unique = [];
+    for (const c of scored) {
+      if (unique.some((o) => sameSig(o.s, c.s))) continue;
+      unique.push(c);
+    }
+    this.results = unique.slice(0, 3);
 
     this.lines = this.results.map((c, i) => {
       const runs = splitRuns(c.r.coords, this.isNew);
@@ -266,32 +270,47 @@
     return lo;
   }
 
-  SuggestTool.prototype._viaCandidates = function (budgetM) {
+  // Point at fraction t along A→B, offset d metres perpendicular on the given side.
+  SuggestTool.prototype._viaPoint = function (t, side, d) {
     const A = this.a.getLatLng(), B = this.b.getLatLng();
     const { kx, ky } = metresPerDeg((A.lat + B.lat) / 2);
     const ax = A.lng * kx, ay = A.lat * ky, bx = B.lng * kx, by = B.lat * ky;
     const L2 = Math.hypot(bx - ax, by - ay);
+    if (L2 < 100) return null;
+    const px = -(by - ay) / L2, py = (bx - ax) / L2;
+    return L.latLng((ay + (by - ay) * t + py * side * d) / ky, (ax + (bx - ax) * t + px * side * d) / kx);
+  };
+
+  SuggestTool.prototype._viaCandidates = function (budgetM) {
+    const A = this.a.getLatLng(), B = this.b.getLatLng();
+    const { kx, ky } = metresPerDeg((A.lat + B.lat) / 2);
+    const L2 = Math.hypot((B.lng - A.lng) * kx, (B.lat - A.lat) * ky);
     if (L2 < 100) return [];
-    const px = -(by - ay) / L2, py = (bx - ax) / L2; // unit perpendicular
     const cands = [];
     for (const t of [0.3, 0.5, 0.7]) {
       // 0.85: real roads are longer than the straight-line bound, so aim inside it
       const dm = dmax(t, L2, budgetM) * 0.85;
       for (const side of [1, -1]) {
-        for (const scale of (t === 0.5 ? [1, 0.55] : [1])) {
+        for (const scale of [1, 0.5]) { // full and medium detours at every station
           const d = dm * scale;
           if (d < 150) continue; // not a meaningful detour
-          const x = ax + (bx - ax) * t + px * side * d;
-          const y = ay + (by - ay) * t + py * side * d;
-          const ll = L.latLng(y / ky, x / kx);
-          cands.push({ latlng: ll, newness: this._newness(ll) });
+          const ll = this._viaPoint(t, side, d);
+          cands.push({ latlng: ll, newness: this._newness(ll), scale, t, side, d });
         }
       }
     }
-    return cands
-      .filter((c) => c.newness >= 0.35) // skip detours into already-covered ground
-      .sort((a, b) => b.newness - a.newness)
-      .slice(0, MAX_VIAS);
+    // Rank by fog within each detour size, then take half from each. Far offsets always
+    // look foggier but often route over the length budget; medium ones fit reliably —
+    // ranking them together would spend the whole request budget on the far side.
+    const rank = (sc) => cands.filter((c) => c.scale === sc && c.newness >= 0.05)
+      .sort((a, b) => b.newness - a.newness);
+    const full = rank(1), med = rank(0.5);
+    const take = Math.ceil(MAX_VIAS / 2);
+    const picked = full.slice(0, take).concat(med.slice(0, take));
+    // top up from whichever side has leftovers if the other ran short
+    for (const c of full.slice(take).concat(med.slice(take)))
+      if (picked.length < MAX_VIAS) picked.push(c);
+    return picked.slice(0, MAX_VIAS);
   };
 
   SuggestTool.prototype._suggestP2P = async function (profile, buffer) {
@@ -320,9 +339,23 @@
       });
     for (const v of this._viaCandidates(budget))
       jobs.push(async () => {
-        const r = await this._route([A, v.latlng, B], profile, 0);
-        if (!r || !r.lenM || r.lenM > budget) return null;
-        return { r, adoptWps: [A, v.latlng, B] };
+        // real streets inflate the straight-line ellipse bound, so a via route often
+        // overshoots the budget — pull the via toward the line proportionally and retry
+        let ll = v.latlng;
+        let r = await this._route([A, ll, B], profile, 0);
+        if (r && r.lenM > budget && r.lenM < budget * 1.8 && r.lenM > base.lenM) {
+          // 0.95: aim just inside the budget — the best detours live right at the edge
+          const shrink = Math.max(0.2, Math.min(0.9, 0.95 * (budget - base.lenM) / (r.lenM - base.lenM)));
+          const d = v.d * shrink;
+          const ll2 = d >= 120 ? this._viaPoint(v.t, v.side, d) : null;
+          if (ll2) {
+            const r2 = await this._route([A, ll2, B], profile, 0);
+            if (r2 && r2.lenM) { r = r2; ll = ll2; }
+          }
+        }
+        // 1.02: don't bin a paid-for route for skimming the budget by metres
+        if (!r || !r.lenM || r.lenM > budget * 1.02) return null;
+        return { r, adoptWps: [A, ll, B] };
       });
 
     const total = jobs.length;
@@ -369,6 +402,17 @@
     return [at(bearingDeg - 45, a), at(bearingDeg, a * Math.SQRT2), at(bearingDeg + 45, a)];
   };
 
+  // Triangle fallback (2 vias, side D/3.75): used when the square's vias hit somewhere
+  // BRouter can't route from (water, restricted areas) — fewer points, fewer chances.
+  SuggestTool.prototype._loopViasTri = function (S, bearingDeg, side) {
+    const { kx, ky } = metresPerDeg(S.lat);
+    const at = (thDeg) => {
+      const th = thDeg * Math.PI / 180;
+      return L.latLng(S.lat + (Math.cos(th) * side) / ky, S.lng + (Math.sin(th) * side) / kx);
+    };
+    return [at(bearingDeg - 30), at(bearingDeg + 30)];
+  };
+
   // Share of the route's length that runs within ~25 m of another, path-distant part of
   // itself — high values mean out-and-back spurs rather than a proper loop.
   function overlapFrac(coords) {
@@ -410,24 +454,39 @@
     emit({ loading: true, phase: "loops", done: 0, total });
 
     // 5: roads inflate the straight square (4a) by ~25%, so start with perimeter = D/1.25.
-    // If the routed loop misses the tolerance, retry once with a proportionally scaled square.
+    // If the routed loop misses the tolerance, retry once with a proportionally scaled shape;
+    // if the square doesn't route at all, fall back to a triangle on the same bearing.
     const loopWps = (vias) => [S].concat(vias, [S]);
+    const fails = { server: 0, tol: 0 };
     const jobs = bearings.map((bearing) => async () => {
-      let a = distM / 5;
-      let vias = this._loopVias(S, bearing, a);
+      let mk = (d) => this._loopVias(S, bearing, d);
+      let dim = distM / 5;
+      let vias = mk(dim);
       let r = await this._route(loopWps(vias), profile, 0);
-      if (r && r.lenM && !inTol(r.lenM)) {
-        a *= Math.min(2.5, Math.max(0.4, distM / r.lenM));
-        const vias2 = this._loopVias(S, bearing, a);
+      if (!r) {
+        mk = (d) => this._loopViasTri(S, bearing, d);
+        dim = distM / 3.75;
+        vias = mk(dim);
+        r = await this._route(loopWps(vias), profile, 0);
+      }
+      if (!r || !r.lenM) { fails.server++; return null; }
+      if (!inTol(r.lenM)) {
+        dim *= Math.min(2.5, Math.max(0.4, distM / r.lenM));
+        const vias2 = mk(dim);
         const r2 = await this._route(loopWps(vias2), profile, 0);
         if (r2 && r2.lenM && Math.abs(r2.lenM - distM) < Math.abs(r.lenM - distM)) { r = r2; vias = vias2; }
       }
-      if (!r || !r.lenM || !inTol(r.lenM)) return null;
+      if (!inTol(r.lenM)) { fails.tol++; return null; }
       return { r, adoptWps: loopWps(vias), overlap: overlapFrac(r.coords) };
     });
 
     const found = await this._pool(jobs, stale, (done) => emit({ loading: true, phase: "loops", done, total }));
     if (stale()) return;
+    if (!found.length && fails.server > 0 && fails.tol === 0) {
+      // nothing routed at all — a server problem, not a tolerance problem; say so
+      emit({ empty: true, reason: "server", targetKm: distM / 1000, bufferPct });
+      return;
+    }
     // prefer proper loops: drop candidates that retrace >30% of themselves, unless that
     // would leave nothing to show
     const clean = found.filter((c) => c.overlap <= 0.3);

@@ -364,6 +364,8 @@
       sugResults.innerHTML = `<div class="muted" style="margin-top:10px">${
         s.reason === "defogged"
           ? "Nothing left to defog around here — every candidate route runs through ground you've already covered. Try a different area" + (s.targetKm != null ? " or a longer distance." : " or a bigger buffer.")
+          : s.reason === "server"
+          ? "The routing server didn't return any routes — it may be busy right now, or this start may be hard to route from. Try again in a minute, or move the start pin."
           : `No loops landed within ±${s.bufferPct}% of ${fmtDist(s.targetKm)} — try a bigger buffer or a different distance.`}</div>`;
       return;
     }
