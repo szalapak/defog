@@ -19,20 +19,18 @@ uploaded anywhere.
   walk / car / rail): draggable & line-insertable waypoints, distance + elevation profile,
   and an estimate of the **new area a route would defog**. Export the route as GPX / KML,
   or open it in Google Maps. km/mi units.
-- **Suggested routes ("surprise me"):** don't feel like drawing? Pick **A → B** and get up
+- **Suggested routes ("surprise me"):** Pick **A → B** and get up
   to three road-snapped options that maximise defogging within a length budget (fastest
-  route + 5/15/30%, your pick) — or pick a **start + distance** and get loops that head
+  route + 5/15/30%, your pick), or pick a **start + distance** and get loops that head
   into your foggiest directions. Every option is scored against your actual fog: the cards
-  show distance, climb, **defogged area and % new ground**, and the previews use the same
-  language as drawn routes (solid = new ground, hatched = already defogged). Tap **Use**
-  to load one into the editor for tweaking and export. Routes that would mostly re-walk
-  covered ground aren't offered — if there's nothing left to defog nearby, the app says so.
+  show distance, climb, defogged area and % new ground. Tap **Use**
+  to load one into the editor for tweaking and export. 
 
 ## Privacy
 
-Your Fog of World data is parsed and drawn **entirely in your browser** — it is never sent
+Your Fog of World data is parsed and drawn in your browser — it is never sent
 to any server. Two features do make outbound requests, and only with the coordinates needed
-for that feature (never your fog data): **route planning and route suggestions** send
+for that feature (not your fog data): **route planning and route suggestions** send
 waypoints to the public [BRouter](https://brouter.de) server to snap them to roads — for
 suggestions this includes a handful of automatically generated candidate points near your
 chosen area (their placement is influenced by where your fog is, but the fog itself is
