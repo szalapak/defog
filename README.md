@@ -1,9 +1,9 @@
 # Defog
 
 A small, browser-based tool that reads your **[Fog of World](https://fogofworld.app/)**
-sync data and renders where you've been as an overlay on a real map — so you can plan routes that maximise new defogging.
+sync data and renders where you've been as an overlay on a real map to help you plan routes that maximise new defogging.
 
-Your **Fog of World data is read and rendered entirely in your browser** — it is never
+Your Fog of World data is read and rendered entirely in your browser, it is never
 uploaded anywhere.
 
 **→ Open the app: <https://szalapak.github.io/defog/>**
@@ -31,14 +31,14 @@ uploaded anywhere.
 Your Fog of World data is parsed and drawn in your browser — it is never sent
 to any server. Two features do make outbound requests, and only with the coordinates needed
 for that feature (not your fog data): **route planning and route suggestions** send
-waypoints to the public [BRouter](https://brouter.de) server to snap them to roads — for
+waypoints to the public [BRouter](https://brouter.de) server to snap them to roads; for
 suggestions this includes a handful of automatically generated candidate points near your
 chosen area (their placement is influenced by where your fog is, but the fog itself is
-never sent) — and **"Maps ↗"** opens your
+never sent), and **"Maps ↗"** opens your
 waypoints in Google Maps. As with any web map, basemap tiles are fetched from their providers
 (OpenStreetMap / CARTO / CyclOSM), which reveals the map area you're viewing to them.
 The site also counts visits with [GoatCounter](https://www.goatcounter.com/), a
-privacy-friendly, cookie-less counter (page views only — no personal data, no tracking
+privacy-friendly, cookie-less counter (page views only; no personal data, no tracking
 across sites).
 
 ## Use it
