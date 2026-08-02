@@ -107,6 +107,14 @@
   RouteTool.prototype.removeAt = function (i) { if (this.wps[i]) this._remove(this.wps[i]); };
   RouteTool.prototype.undo = function () { if (this.wps.length) this._remove(this.wps[this.wps.length - 1]); };
 
+  // Replace all waypoints at once (used when adopting a suggested route) — one recalc.
+  RouteTool.prototype.setWaypoints = function (latlngs) {
+    this.wps.forEach((w) => this.map.removeLayer(w.marker));
+    this.wps = latlngs.map((ll, i) => this._makeWp(L.latLng(ll), i));
+    this._emitWps();
+    this._recalc();
+  };
+
   RouteTool.prototype.clear = function () {
     this.wps.forEach((w) => this.map.removeLayer(w.marker));
     this.wps = [];
