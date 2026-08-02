@@ -123,6 +123,7 @@
     if (b) map.fitBounds(b, { padding: [20, 20] });
     setLoad(`${fogMap.tileCount} tiles loaded ✓`);
     updateDefog();
+    syncSug(); // fog just arrived — the Suggest button can wake up
   }
   async function loadFromInput(fileList) {
     const files = Array.from(fileList); if (!files.length) return;
@@ -305,11 +306,151 @@
     }
   });
 
+  // ---- suggested routes ("Suggest" flow in the Plan tab) ----------------------
+  const planSeg = $("planSeg"), drawPanel = $("drawPanel"), sugPanel = $("sugPanel");
+  const sugStatus = $("sugStatus"), sugGo = $("sugGo"), sugReset = $("sugReset");
+  const sugFogHint = $("sugFogHint"), sugResults = $("sugResults");
+  const sugModeSeg = $("sugModeSeg"), sugBufSeg = $("sugBufSeg");
+  const sugDistRow = $("sugDistRow"), sugDist = $("sugDist"), sugDistUnit = $("sugDistUnit");
+  let lastSug = null;
+  let sugBuffer = parseInt(localStorage.getItem("f2m_sugbuf") || "15", 10);
+  let loopKm = parseFloat(localStorage.getItem("f2m_loopkm") || "10");
+
+  const suggest = new SuggestTool(map, {
+    fogMap,
+    computeGain,
+    isNew: cellIsNew, // previews get the same solid-new / hatched-old split as drawn routes
+    onPoints: (n) => {
+      sugStatus.textContent = suggest.mode === "loop"
+        ? (n === 0 ? "Tap the map to set your loop's start." :
+           "Start set — drag the pin to adjust, tap it to remove it.")
+        : (n === 0 ? "Tap the map to set your start." :
+           n === 1 ? "Now tap your destination." :
+           "Start & end set — drag the pins to adjust, tap one to remove it.");
+      if (n >= suggest.pointsNeeded()) sidebar.classList.add("open"); // mobile: bring the panel back up
+      syncSug();
+    },
+    onResults: (s) => { lastSug = s; renderSug(); }
+  });
+
+  function syncSug() {
+    const fogLoaded = fogMap.tileCount > 0;
+    sugGo.disabled = suggest.pointCount() < suggest.pointsNeeded() || !fogLoaded;
+    sugFogHint.style.display = fogLoaded ? "none" : "";
+  }
+
+  // loop distance is stored in km; the input shows it in the active unit
+  function syncDistInput() {
+    sugDistUnit.textContent = units === "imperial" ? "mi" : "km";
+    sugDist.value = (units === "imperial" ? loopKm * 0.621371 : loopKm).toFixed(1).replace(/\.0$/, "");
+  }
+  syncDistInput();
+
+  function renderSug() {
+    const s = lastSug;
+    if (!s) { sugResults.innerHTML = ""; return; }
+    if (s.loading) {
+      sugResults.innerHTML = `<div class="muted" style="margin-top:10px">${
+        s.phase === "baseline" ? "Finding the fastest route…" :
+        s.phase === "loops" ? `Routing loops… ${s.done}/${s.total}` :
+        `Exploring detours… ${s.done}/${s.total}`}</div>`;
+      return;
+    }
+    if (s.error) {
+      sugResults.innerHTML = `<div class="muted" style="margin-top:10px">Routing server unreachable — try again in a moment.</div>`;
+      return;
+    }
+    if (s.empty) {
+      sugResults.innerHTML = `<div class="muted" style="margin-top:10px">${
+        s.reason === "defogged"
+          ? "Nothing left to defog around here — every candidate route runs through ground you've already covered. Try a different area" + (s.targetKm != null ? " or a longer distance." : " or a bigger buffer.")
+          : s.reason === "server"
+          ? "The routing server didn't return any routes — it may be busy right now, or this start may be hard to route from. Try again in a minute, or move the start pin."
+          : `No loops landed within ±${s.bufferPct}% of ${fmtDist(s.targetKm)} — try a bigger buffer or a different distance.`}</div>`;
+      return;
+    }
+    const isLoop = s.targetKm != null;
+    const header = isLoop
+      ? `Loops near ${fmtDist(s.targetKm)} (±${s.bufferPct}%), ranked by defogging — tap to preview:`
+      : `Best defogging within ${fmtDist(s.baseKm * (1 + s.bufferPct / 100))} (fastest + ${s.bufferPct}%) — tap to preview:`;
+    const deltaLabel = (c) => {
+      if (!isLoop) return c.isBase ? "the fastest route" : "+" + fmtDist(c.deltaKm) + " extra";
+      return (c.deltaKm >= 0 ? "+" : "−") + fmtDist(Math.abs(c.deltaKm)) + " vs target";
+    };
+    sugResults.innerHTML =
+      `<div class="muted" style="margin:10px 0 2px">${header}</div>` +
+      s.list.map((c, i) =>
+        `<div class="sugCard${i === suggest.selected ? " sel" : ""}" data-i="${i}">
+          <div class="sugTop"><span class="chip" style="background:${c.color}"></span><b>${fmtDist(c.km)}</b>
+            <span class="muted">${deltaLabel(c)}</span>
+            <button class="use act" data-use="${i}">Use</button></div>
+          <div class="sugGain"><span>defogs ~${fmtArea(c.area)}</span><span>${fmtPct(c.newPct)} new ground</span></div>
+          <div class="sugSub"><span>↑ ${fmtEle(c.ascent)}</span><span>↓ ${fmtEle(c.descent)}</span></div>
+        </div>`).join("");
+    sugResults.querySelectorAll(".sugCard").forEach((el) => el.addEventListener("click", () => {
+      suggest.select(parseInt(el.dataset.i, 10));
+      sugResults.querySelectorAll(".sugCard").forEach((x) => x.classList.toggle("sel", x === el));
+    }));
+    sugResults.querySelectorAll("[data-use]").forEach((el) => el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const wps = suggest.adopt(parseInt(el.dataset.use, 10));
+      if (!wps) return;
+      route.setWaypoints(wps);
+      setSeg("draw"); // hand over to the editor: tweak pins, see the two-colour path, export
+    }));
+  }
+
+  function setSeg(which) {
+    planSeg.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.s === which));
+    drawPanel.style.display = which === "draw" ? "" : "none";
+    sugPanel.style.display = which === "suggest" ? "" : "none";
+    if (which === "suggest") {
+      if (route.active) { route.setActive(false); drawBtn.textContent = "Start drawing"; drawBtn.style.background = ""; }
+      suggest.setActive(true);
+      syncSug();
+      if (suggest.pointCount() < suggest.pointsNeeded()) sidebar.classList.remove("open"); // mobile: reveal the map to tap points
+    } else {
+      suggest.setActive(false);
+    }
+  }
+  planSeg.querySelectorAll("button").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); setSeg(b.dataset.s); }));
+
+  sugModeSeg.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    sugModeSeg.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
+    sugDistRow.style.display = b.dataset.m === "loop" ? "" : "none";
+    suggest.setMode(b.dataset.m); // fires onPoints -> status text + button state
+  }));
+
+  sugBufSeg.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", parseInt(b.dataset.b, 10) === sugBuffer);
+    b.addEventListener("click", () => {
+      sugBuffer = parseInt(b.dataset.b, 10);
+      localStorage.setItem("f2m_sugbuf", String(sugBuffer));
+      sugBufSeg.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
+      suggest.clearResults(); // old results were ranked under the old budget
+    });
+  });
+
+  sugDist.addEventListener("change", () => {
+    const v = parseFloat(sugDist.value);
+    if (v > 0) loopKm = Math.min(300, units === "imperial" ? v / 0.621371 : v);
+    localStorage.setItem("f2m_loopkm", String(loopKm));
+    syncDistInput();
+    suggest.clearResults();
+  });
+
+  sugGo.addEventListener("click", () => {
+    route.clear(); // don't leave a hand-drawn route tangled under the previews
+    suggest.suggest(profile, { buffer: sugBuffer / 100, distM: loopKm * 1000 });
+  });
+  sugReset.addEventListener("click", () => suggest.reset());
+
   const modeBtns = document.querySelectorAll("#modes button");
   function setMode(p) {
     profile = p;
     modeBtns.forEach((b) => b.classList.toggle("active", b.dataset.p === p));
     route.setProfile(p);
+    suggest.clearResults(); // suggestions were ranked for the old mode
   }
   modeBtns.forEach((b) => b.addEventListener("click", () => setMode(b.dataset.p)));
   setMode("trekking");
@@ -321,7 +462,7 @@
     b.addEventListener("click", () => {
       units = b.dataset.u; localStorage.setItem("f2m_units", units);
       unitSeg.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
-      renderStats(); renderElev();
+      renderStats(); renderElev(); renderSug(); syncDistInput();
     });
   });
 
