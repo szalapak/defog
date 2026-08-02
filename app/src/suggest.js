@@ -10,9 +10,9 @@
   const MAX_VIAS = 6;           // fog-seeking detour candidates per p2p run
   const MAX_LOOPS = 6;          // loop bearings tried per run
   const CONCURRENCY = 3;        // parallel BRouter requests (be kind to the public server)
-  // Muted crimson · terracotta · berry — same warm family as the drawn route,
-  // deliberately far from the blue/purple/slate fog swatches.
-  const COLORS = ["#d6455f", "#e0813f", "#a34a6b"];
+  // Same neon family as the drawn route (#ff2d55): red · pink · orange — pops against
+  // the fog, deliberately far from the blue/purple/slate fog swatches.
+  const COLORS = ["#ff2d55", "#ff4fa3", "#ff8c2d"];
 
   function pinIcon(cls, label) {
     const COARSE = !!(global.matchMedia && global.matchMedia("(pointer: coarse)").matches);
@@ -439,6 +439,83 @@
     return total ? overlap / total : 0;
   }
 
+  // Cut "there and back" excursions that mostly retrace already-defogged ground: find a
+  // later point returning within 40 m of an earlier one and, if the excursion between
+  // them breaks (almost) no new ground, splice it out — the loop gets rounder and
+  // shorter at no cost to defogging. Excursions into fog are kept: they earn their area.
+  function snipOldSpurs(coords, isNew, minLenM) {
+    if (!isNew || coords.length < 10) return null;
+    const { kx, ky } = metresPerDeg(coords[0][1]);
+    const xy = coords.map((p) => ({ x: p[0] * kx, y: p[1] * ky }));
+    const cum = [0];
+    for (let i = 1; i < coords.length; i++) cum.push(cum[i - 1] + Math.hypot(xy[i].x - xy[i - 1].x, xy[i].y - xy[i - 1].y));
+    const total = cum[cum.length - 1];
+    const near = (i, j) => Math.hypot(xy[i].x - xy[j].x, xy[i].y - xy[j].y) < 40;
+    const snips = [];
+    for (let i = 0; i < coords.length - 1; i++) {
+      let found = -1;
+      for (let j = coords.length - 1; j > i; j--) { // longest excursion from i first
+        const ex = cum[j] - cum[i];
+        if (ex < 250) break;              // too short to matter (and shrinking further)
+        if (ex > total * 0.45) continue;  // never amputate the main loop body
+        if (near(i, j)) { found = j; break; }
+      }
+      if (found < 0) continue;
+      let oldLen = 0;
+      for (let k = i; k < found; k++)
+        if (!isNew((coords[k][0] + coords[k + 1][0]) / 2, (coords[k][1] + coords[k + 1][1]) / 2))
+          oldLen += cum[k + 1] - cum[k];
+      if (oldLen / (cum[found] - cum[i]) >= 0.6) snips.push({ i, j: found, cut: cum[found] - cum[i] });
+    }
+    // apply biggest cuts first, skip overlapping ones, never fall below the tolerance floor
+    snips.sort((a, b) => b.cut - a.cut);
+    const applied = [];
+    let remaining = total;
+    for (const s of snips) {
+      if (applied.some((a) => s.i < a.j && a.i < s.j)) continue;
+      if (remaining - s.cut < minLenM) continue;
+      applied.push(s);
+      remaining -= s.cut;
+    }
+    if (!applied.length) return null;
+    applied.sort((a, b) => a.i - b.i);
+    const out = [];
+    let idx = 0;
+    for (const s of applied) { out.push(...coords.slice(idx, s.i + 1)); idx = s.j; }
+    out.push(...coords.slice(idx));
+    return out;
+  }
+
+  // Recompute length/ascent/descent after geometry surgery.
+  function statsFromCoords(coords) {
+    const { kx, ky } = metresPerDeg(coords[0][1]);
+    let len = 0, asc = 0, desc = 0;
+    for (let i = 1; i < coords.length; i++) {
+      len += Math.hypot((coords[i][0] - coords[i - 1][0]) * kx, (coords[i][1] - coords[i - 1][1]) * ky);
+      const d = (coords[i][2] || 0) - (coords[i - 1][2] || 0);
+      if (d > 0) asc += d; else desc -= d;
+    }
+    return { coords, lenM: Math.round(len), ascent: Math.round(asc), descent: Math.round(desc) };
+  }
+
+  // Waypoints that pin a snipped loop's cleaned shape, so adopting it makes BRouter
+  // follow the same streets instead of re-growing the spur.
+  function resampleWps(S, coords, n) {
+    const { kx, ky } = metresPerDeg(coords[0][1]);
+    const cum = [0];
+    for (let i = 1; i < coords.length; i++)
+      cum.push(cum[i - 1] + Math.hypot((coords[i][0] - coords[i - 1][0]) * kx, (coords[i][1] - coords[i - 1][1]) * ky));
+    const total = cum[cum.length - 1];
+    const mids = [];
+    let k = 1;
+    for (let t = 1; t <= n; t++) {
+      const target = total * t / (n + 1);
+      while (k < cum.length - 1 && cum[k] < target) k++;
+      mids.push(L.latLng(coords[k][1], coords[k][0]));
+    }
+    return [S].concat(mids, [S]);
+  }
+
   SuggestTool.prototype._suggestLoop = async function (profile, distM, buffer) {
     if (!this.a || !distM) return;
     this.clearResults();
@@ -477,7 +554,13 @@
         if (r2 && r2.lenM && Math.abs(r2.lenM - distM) < Math.abs(r.lenM - distM)) { r = r2; vias = vias2; }
       }
       if (!inTol(r.lenM)) { fails.tol++; return null; }
-      return { r, adoptWps: loopWps(vias), overlap: overlapFrac(r.coords) };
+      let adoptWps = loopWps(vias);
+      const snipped = snipOldSpurs(r.coords, this.isNew, distM * (1 - buffer));
+      if (snipped) {
+        r = statsFromCoords(snipped);
+        adoptWps = resampleWps(S, snipped, 4);
+      }
+      return { r, adoptWps, overlap: overlapFrac(r.coords) };
     });
 
     const found = await this._pool(jobs, stale, (done) => emit({ loading: true, phase: "loops", done, total }));
