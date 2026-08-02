@@ -107,9 +107,10 @@
     .wpRow .co { flex: 1; cursor: pointer; }
     .wpRow .x { background: none; border: 0; color: #c0392b; cursor: pointer; font-size: 15px; padding: 0 4px; }
 
-    .wp { width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: #fff;
+    .wp { width: 100%; height: 100%; border-radius: 50%; background: var(--accent); color: #fff;
       border: 2px solid #fff; box-shadow: 0 1px 4px #0006; font-size: 11px; font-weight: 700;
       display: flex; align-items: center; justify-content: center; cursor: grab; }
+    @media (pointer: coarse) { .wp { font-size: 13px; } }
 
     .leaflet-bar { border-radius: 9px !important; overflow: hidden; border: 1px solid var(--line2) !important; }
     .leaflet-bar a { font-family: var(--mono); }
@@ -178,13 +179,17 @@
             <label class="file primary">Pick your Sync folder…
               <input id="folder" type="file" webkitdirectory directory multiple />
             </label>
+            <label class="file">…or a .zip
+              <input id="zip" type="file" accept=".zip,application/zip" />
+            </label>
           </div>
           <details>
             <summary>Where's my Sync folder?</summary>
-            <p>Fog of World keeps a folder named <b>Sync</b> full of small files — point the picker at it.</p>
+            <p>Fog of World keeps a folder named <b>Sync</b> full of small files — point the folder picker at it.</p>
             <p><b>Dropbox sync:</b> <code>Dropbox/Apps/Fog of World/Sync</code>.<br>
                <b>OneDrive sync:</b> the <code>Fog of World/Sync</code> folder in your OneDrive.<br>
                <b>Otherwise:</b> in Fog of World open <b>Settings → Data / Backup</b>, export a backup, and use the <b>Sync</b> folder inside it.</p>
+            <p><b>On a phone?</b> Folder-picking is unreliable, and files kept only in Google Drive / iCloud may fail to download when picked. Easiest: keep your backup as a <b>.zip</b> and load it with the “…or a .zip” button — no unzipping needed.</p>
           </details>
           <div class="muted" id="loadStatus">Your fog is read on your device — it is never uploaded.</div>
 
@@ -253,7 +258,7 @@
           </div>
 
           <div id="statsWrap"></div>
-          <div class="muted" id="routeHint">Click the map to drop waypoints. Drag the line to bend the route; click a point to remove it.</div>
+          <div class="muted" id="routeHint">Tap the map to drop waypoints. Drag the line to bend it, drag a pin to move it, tap a pin to remove it.</div>
 
           <h4 id="elevHead" style="display:none">Elevation</h4>
           <div id="elev"></div>
@@ -282,6 +287,7 @@
 
   <script src="vendor/leaflet.js"></script>
   <script src="vendor/pako_inflate.min.js"></script>
+  <script src="src/unzip.js"></script>
   <script src="src/parser.js"></script>
   <script src="src/fogLayer.js"></script>
   <script src="src/route.js"></script>

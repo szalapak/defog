@@ -126,14 +126,41 @@
   }
   async function loadFromInput(fileList) {
     const files = Array.from(fileList); if (!files.length) return;
-    let ok = 0, i = 0;
+    let ok = 0, readErr = 0, i = 0;
     for (const f of files) {
-      try { if (inflateToTile(f.name, await f.arrayBuffer())) ok++; } catch (e) {}
+      let buf;
+      try { buf = await f.arrayBuffer(); }
+      catch (e) { readErr++; continue; } // e.g. a cloud placeholder that isn't downloaded to the device
+      try { if (inflateToTile(f.name, buf)) ok++; } catch (e) {}
       if (++i % 50 === 0) setLoad(`Decoding… ${i}/${files.length}`);
     }
-    finishLoad();
+    if (ok > 0) {
+      finishLoad();
+      if (readErr > 0) setLoad(`${fogMap.tileCount} tiles loaded ✓ — ${readErr} file${readErr > 1 ? "s" : ""} couldn't be read (files kept only in the cloud aren't downloaded — try the .zip instead).`);
+    } else if (readErr > 0) {
+      setLoad("Couldn't read the files — if this folder lives in Google Drive or iCloud, it may not be downloaded to the phone. Download your backup and load the .zip instead.");
+    } else {
+      setLoad("No fog tiles found — did you pick the Sync folder?");
+    }
   }
   $("folder").addEventListener("change", (e) => loadFromInput(e.target.files));
+
+  async function loadFromZip(file) {
+    if (!file) return;
+    setLoad("Reading .zip…");
+    let entries;
+    try { entries = FogZip.unzip(await file.arrayBuffer()); }
+    catch (e) { setLoad("Couldn't open that .zip — is it a Fog of World backup?"); return; }
+    let ok = 0, i = 0;
+    for (const ent of entries) {
+      const base = ent.name.split(/[\\/]/).pop(); // tile filenames live under Sync/ inside the zip (tolerate \ or /)
+      try { if (fogMap.addTile(base, pako.inflate(ent.data))) ok++; } catch (e) {}
+      if (++i % 200 === 0) setLoad(`Decoding… ${i}/${entries.length}`);
+    }
+    if (ok > 0) finishLoad();
+    else setLoad("No fog tiles found in that .zip — make sure it contains your Sync folder.");
+  }
+  $("zip").addEventListener("change", (e) => loadFromZip(e.target.files[0]));
 
   // ---- route planning ---------------------------------------------------------
   const exportGpxBtn = $("exportGpx"), exportKmlBtn = $("exportKml"), gmapsBtn = $("openGmaps");
@@ -141,7 +168,7 @@
   const elevEl = $("elev"), elevHead = $("elevHead"), wpListEl = $("wpList"), wpHead = $("wpHead");
   const ELEV_MODES = new Set(["trekking", "fastbike", "hiking-mountain"]);
   const MODE_LABEL = { trekking: "bike route", fastbike: "road bike route", "hiking-mountain": "walk", "car-fast": "car route", rail: "rail route", shortest: "direct line" };
-  const IDLE = "Click the map to drop waypoints. Drag the line to bend the route; click a point to remove it.";
+  const IDLE = "Tap the map to drop waypoints. Drag the line to bend it, drag a pin to move it, tap a pin to remove it.";
   let profile = "trekking";
   const DEFOG_HALF_M = 15; // assumed half-width of the corridor Fog of World clears as you travel
   let units = localStorage.getItem("f2m_units") || "metric";
@@ -303,6 +330,7 @@
     route.setActive(on);
     drawBtn.textContent = on ? "Stop drawing" : "Start drawing";
     drawBtn.style.background = on ? "#c9384f" : "";
+    if (on) sidebar.classList.remove("open"); // mobile: drop the sheet so the map is tappable
   });
   $("undo").addEventListener("click", () => route.undo());
   $("clear").addEventListener("click", () => route.clear());

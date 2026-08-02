@@ -6,8 +6,11 @@
 (function (global) {
   const BROUTER = "https://brouter.de/brouter";
 
+  // Bigger, finger-friendly pins on touch screens (easier to grab, drag, and tap-to-remove).
+  const COARSE = !!(global.matchMedia && global.matchMedia("(pointer: coarse)").matches);
+  const WP_SZ = COARSE ? 26 : 18;
   function wpIcon(n) {
-    return L.divIcon({ className: "", html: '<div class="wp">' + n + "</div>", iconSize: [18, 18], iconAnchor: [9, 9] });
+    return L.divIcon({ className: "", html: '<div class="wp">' + n + "</div>", iconSize: [WP_SZ, WP_SZ], iconAnchor: [WP_SZ / 2, WP_SZ / 2] });
   }
 
   function RouteTool(map, opts) {
@@ -23,19 +26,44 @@
     // One-colour base line (waypoint-only / drag preview / no-fog fallback), plus two
     // fog-aware overlays: solid red where the route breaks new ground, dashed ("hatched")
     // red where you've already defogged.
+    // Invisible, extra-thick "hit" line beneath the visible ones so the route is easy to
+    // grab — especially with a fingertip. pointer-events:stroke makes it catch pointers
+    // along its full width even though it's completely transparent.
+    this.hit = L.polyline([], { weight: COARSE ? 30 : 16, opacity: 0, interactive: true }).addTo(map);
+    const hitEl = this.hit.getElement && this.hit.getElement();
+    if (hitEl) hitEl.setAttribute("pointer-events", "stroke");
+
     this.line = L.polyline([], { color: "#ff2d55", weight: 4, opacity: 0.95 }).addTo(map);
     this.segNew = L.polyline([], { color: "#ff2d55", weight: 5, opacity: 0.95 }).addTo(map);
     this.segOld = L.polyline([], { color: "#ff2d55", weight: 3.5, opacity: 0.85, dashArray: "2 8", lineCap: "round" }).addTo(map);
     this.active = false;
     this._reqId = 0;
     this._suppressClick = false;
+    this._grabbing = false;
 
     this._onClick = (e) => {
       if (this._suppressClick) { this._suppressClick = false; return; }
       this.add(e.latlng);
     };
-    [this.line, this.segNew, this.segOld].forEach((l) => l.on("mousedown", (e) => this._grabLine(e)));
+
+    // Grab the line to insert a waypoint mid-route. mousedown also fires from pointer/touch
+    // on modern browsers; the explicit touchstart is a fallback for those without pointer events.
+    [this.hit, this.line, this.segNew, this.segOld].forEach((l) => {
+      l.on("mousedown", (e) => this._grabLine(e.latlng, e.originalEvent, false));
+      const el = l.getElement && l.getElement();
+      if (el) L.DomEvent.on(el, "touchstart", (ev) => {
+        if (this._grabbing || this.wps.length < 2) return;
+        if (ev.touches && ev.touches.length !== 1) return; // ignore pinch/multi-touch
+        L.DomEvent.preventDefault(ev);
+        this._grabLine(this._touchLatLng(ev.touches[0]), ev, true);
+      });
+    });
   }
+
+  RouteTool.prototype._touchLatLng = function (t) {
+    const r = this.map.getContainer().getBoundingClientRect();
+    return this.map.containerPointToLatLng([t.clientX - r.left, t.clientY - r.top]);
+  };
 
   RouteTool.prototype.setActive = function (on) {
     this.active = on;
@@ -84,6 +112,7 @@
     this.wps = [];
     this.routeCoords = [];
     this.line.setLatLngs([]);
+    this.hit.setLatLngs([]);
     this._clearSegs();
     this._emitWps();
     this._emit(null);
@@ -94,6 +123,7 @@
   // Draw the routed line. With fog loaded, split it into new-ground vs already-defogged runs
   // (two red styles); otherwise fall back to the single base line.
   RouteTool.prototype._renderLine = function (coords) {
+    this.hit.setLatLngs(coords.map((c) => [c[1], c[0]])); // keep the grab target on the routed path
     if (!(this.isNew && this.fogReady && this.fogReady())) {
       this._clearSegs();
       this.line.setLatLngs(coords.map((c) => [c[1], c[0]]));
@@ -154,22 +184,45 @@
     return best;
   };
 
-  RouteTool.prototype._grabLine = function (e) {
-    if (this.wps.length < 2) return;
-    L.DomEvent.stop(e);
+  RouteTool.prototype._grabLine = function (latlng, oe, isTouch) {
+    if (this._grabbing || this.wps.length < 2) return;
+    this._grabbing = true;
+    if (oe && !isTouch) L.DomEvent.stop(oe); // stop the mousedown so the map doesn't start panning
     this._suppressClick = true;
-    const wp = this._insertAt(this._insertionIndex(e.latlng), e.latlng);
+    const wp = this._insertAt(this._insertionIndex(latlng), latlng);
     this._emitWps();
     const map = this.map;
-    this._clearSegs(); // show the single base line while dragging; segments redraw on mouseup
+    this._clearSegs(); // show the single base line while dragging; segments redraw on release
     map.dragging.disable();
-    const move = (ev) => { wp.latlng = ev.latlng; wp.marker.setLatLng(ev.latlng); this.line.setLatLngs(this.wps.map((w) => w.latlng)); };
-    const up = () => {
-      map.off("mousemove", move); map.off("mouseup", up); map.dragging.enable();
+    const container = map.getContainer();
+
+    const move = (ll) => { wp.latlng = ll; wp.marker.setLatLng(ll); this.line.setLatLngs(this.wps.map((w) => w.latlng)); };
+    let cleanup;
+    const finish = () => {
+      cleanup();
+      map.dragging.enable();
+      this._grabbing = false;
       setTimeout(() => { this._suppressClick = false; }, 0);
       this._recalc();
     };
-    map.on("mousemove", move); map.on("mouseup", up);
+
+    if (isTouch) {
+      const tmove = (ev) => { if (ev.touches && ev.touches[0]) { move(this._touchLatLng(ev.touches[0])); ev.preventDefault(); } };
+      const tend = () => finish();
+      cleanup = () => {
+        container.removeEventListener("touchmove", tmove);
+        container.removeEventListener("touchend", tend);
+        container.removeEventListener("touchcancel", tend);
+      };
+      container.addEventListener("touchmove", tmove, { passive: false });
+      container.addEventListener("touchend", tend);
+      container.addEventListener("touchcancel", tend);
+    } else {
+      const mmove = (ev) => move(ev.latlng);
+      const mup = () => finish();
+      cleanup = () => { map.off("mousemove", mmove); map.off("mouseup", mup); };
+      map.on("mousemove", mmove); map.on("mouseup", mup);
+    }
   };
 
   // ----- routing ---------------------------------------------------------------
@@ -178,6 +231,7 @@
       this.routeCoords = [];
       this._clearSegs();
       this.line.setLatLngs(this.wps.map((w) => w.latlng));
+      this.hit.setLatLngs(this.wps.map((w) => w.latlng));
       this._emit(this.wps.length ? { points: this.wps.length } : null);
       return;
     }
@@ -201,6 +255,7 @@
       this.routeCoords = this.wps.map((w) => [w.latlng.lng, w.latlng.lat]);
       this._clearSegs();
       this.line.setLatLngs(this.wps.map((w) => w.latlng));
+      this.hit.setLatLngs(this.wps.map((w) => w.latlng));
       this._emit({ points: this.wps.length, error: true });
     }
   };
