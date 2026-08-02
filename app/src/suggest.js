@@ -355,6 +355,8 @@
         }
         // 1.02: don't bin a paid-for route for skimming the budget by metres
         if (!r || !r.lenM || r.lenM > budget * 1.02) return null;
+        const snip = snipOldSpurs(r.coords, this.computeGain, 0);
+        if (snip.coords) return { r: statsFromCoords(snip.coords), adoptWps: [A].concat(resampleMids(snip.coords, 3), [B]) };
         return { r, adoptWps: [A, ll, B] };
       });
 
@@ -439,51 +441,60 @@
     return total ? overlap / total : 0;
   }
 
-  // Cut "there and back" excursions that mostly retrace already-defogged ground: find a
-  // later point returning within 40 m of an earlier one and, if the excursion between
-  // them breaks (almost) no new ground, splice it out — the loop gets rounder and
-  // shorter at no cost to defogging. Excursions into fog are kept: they earn their area.
-  function snipOldSpurs(coords, isNew, minLenM) {
-    if (!isNew || coords.length < 10) return null;
+  // Cut "there and back" excursions that don't pull their weight: an excursion is a
+  // stretch that returns to within 60 m of where it left the route. If the defog area
+  // it contributes per metre is under 40% of the route's overall rate, splice it out —
+  // that catches dead-end re-walks of covered ground (rate ≈ 0) and marginal wiggles,
+  // while keeping spurs INTO fog, which are ugly but often the point of the suggestion.
+  // Returns { coords, blockedM }: coords is the spliced geometry (null if nothing was
+  // cut) and blockedM the length of cuts wanted but skipped to respect minLenM — the
+  // caller can regrow the loop by that much and retry.
+  function snipOldSpurs(coords, computeGain, minLenM) {
+    const none = { coords: null, blockedM: 0 };
+    if (!computeGain || coords.length < 10) return none;
+    const routeGain = computeGain(coords);
+    if (!routeGain || !(routeGain.area > 0)) return none;
     const { kx, ky } = metresPerDeg(coords[0][1]);
     const xy = coords.map((p) => ({ x: p[0] * kx, y: p[1] * ky }));
     const cum = [0];
     for (let i = 1; i < coords.length; i++) cum.push(cum[i - 1] + Math.hypot(xy[i].x - xy[i - 1].x, xy[i].y - xy[i - 1].y));
     const total = cum[cum.length - 1];
-    const near = (i, j) => Math.hypot(xy[i].x - xy[j].x, xy[i].y - xy[j].y) < 40;
+    const routeEff = routeGain.area / total;
+    const near = (i, j) => Math.hypot(xy[i].x - xy[j].x, xy[i].y - xy[j].y) < 60;
     const snips = [];
-    for (let i = 0; i < coords.length - 1; i++) {
+    let i = 0;
+    while (i < coords.length - 1) {
       let found = -1;
       for (let j = coords.length - 1; j > i; j--) { // longest excursion from i first
         const ex = cum[j] - cum[i];
-        if (ex < 250) break;              // too short to matter (and shrinking further)
+        if (ex < 200) break;              // too short to matter (and shrinking further)
         if (ex > total * 0.45) continue;  // never amputate the main loop body
         if (near(i, j)) { found = j; break; }
       }
-      if (found < 0) continue;
-      let oldLen = 0;
-      for (let k = i; k < found; k++)
-        if (!isNew((coords[k][0] + coords[k + 1][0]) / 2, (coords[k][1] + coords[k + 1][1]) / 2))
-          oldLen += cum[k + 1] - cum[k];
-      if (oldLen / (cum[found] - cum[i]) >= 0.6) snips.push({ i, j: found, cut: cum[found] - cum[i] });
+      if (found < 0) { i++; continue; }
+      const without = coords.slice(0, i + 1).concat(coords.slice(found));
+      const lost = routeGain.area - ((computeGain(without) || { area: 0 }).area || 0);
+      const exLen = cum[found] - cum[i];
+      if (lost / exLen < 0.5 * routeEff) snips.push({ i, j: found, cut: exLen });
+      i = found;
     }
     // apply biggest cuts first, skip overlapping ones, never fall below the tolerance floor
     snips.sort((a, b) => b.cut - a.cut);
     const applied = [];
-    let remaining = total;
+    let remaining = total, blockedM = 0;
     for (const s of snips) {
       if (applied.some((a) => s.i < a.j && a.i < s.j)) continue;
-      if (remaining - s.cut < minLenM) continue;
+      if (remaining - s.cut < minLenM) { blockedM += s.cut; continue; }
       applied.push(s);
       remaining -= s.cut;
     }
-    if (!applied.length) return null;
+    if (!applied.length) return { coords: null, blockedM };
     applied.sort((a, b) => a.i - b.i);
     const out = [];
     let idx = 0;
     for (const s of applied) { out.push(...coords.slice(idx, s.i + 1)); idx = s.j; }
     out.push(...coords.slice(idx));
-    return out;
+    return { coords: out, blockedM };
   }
 
   // Recompute length/ascent/descent after geometry surgery.
@@ -498,9 +509,9 @@
     return { coords, lenM: Math.round(len), ascent: Math.round(asc), descent: Math.round(desc) };
   }
 
-  // Waypoints that pin a snipped loop's cleaned shape, so adopting it makes BRouter
-  // follow the same streets instead of re-growing the spur.
-  function resampleWps(S, coords, n) {
+  // Evenly spaced points along a snipped route's cleaned shape — used as adoption
+  // waypoints so BRouter follows the same streets instead of re-growing the spur.
+  function resampleMids(coords, n) {
     const { kx, ky } = metresPerDeg(coords[0][1]);
     const cum = [0];
     for (let i = 1; i < coords.length; i++)
@@ -513,7 +524,7 @@
       while (k < cum.length - 1 && cum[k] < target) k++;
       mids.push(L.latLng(coords[k][1], coords[k][0]));
     }
-    return [S].concat(mids, [S]);
+    return mids;
   }
 
   SuggestTool.prototype._suggestLoop = async function (profile, distM, buffer) {
@@ -535,32 +546,44 @@
     // if the square doesn't route at all, fall back to a triangle on the same bearing.
     const loopWps = (vias) => [S].concat(vias, [S]);
     const fails = { server: 0, tol: 0 };
+    const floor = distM * (1 - buffer);
     const jobs = bearings.map((bearing) => async () => {
       let mk = (d) => this._loopVias(S, bearing, d);
+      // route + snip in one step, so tolerance and the rescale-retry both judge the
+      // CLEANED length — a loop whose snips pull it under target gets regrown, not binned
+      const prep = async (d) => {
+        const vias = mk(d);
+        const raw = await this._route(loopWps(vias), profile, 0);
+        if (!raw || !raw.lenM) return null;
+        const snip = snipOldSpurs(raw.coords, this.computeGain, floor);
+        return snip.coords
+          ? { r: statsFromCoords(snip.coords), adoptWps: [S].concat(resampleMids(snip.coords, 4), [S]), blockedM: snip.blockedM }
+          : { r: raw, adoptWps: loopWps(vias), blockedM: snip.blockedM };
+      };
       let dim = distM / 5;
-      let vias = mk(dim);
-      let r = await this._route(loopWps(vias), profile, 0);
-      if (!r) {
+      let c = await prep(dim);
+      if (!c) {
         mk = (d) => this._loopViasTri(S, bearing, d);
         dim = distM / 3.75;
-        vias = mk(dim);
-        r = await this._route(loopWps(vias), profile, 0);
+        c = await prep(dim);
       }
-      if (!r || !r.lenM) { fails.server++; return null; }
-      if (!inTol(r.lenM)) {
-        dim *= Math.min(2.5, Math.max(0.4, distM / r.lenM));
-        const vias2 = mk(dim);
-        const r2 = await this._route(loopWps(vias2), profile, 0);
-        if (r2 && r2.lenM && Math.abs(r2.lenM - distM) < Math.abs(r.lenM - distM)) { r = r2; vias = vias2; }
+      if (!c) { fails.server++; return null; }
+      // retry when out of tolerance OR a wanted snip was blocked by the tolerance floor —
+      // regrowing by the blocked amount makes the cut affordable on the second pass
+      const badness = (x) => (inTol(x.r.lenM) ? 0 : 2) + (x.blockedM > 0 ? 1 : 0);
+      // up to two improvement passes: a far-off first shot may need one rescale to reach
+      // tolerance and a second to regrow room for a floor-blocked snip
+      for (let attempt = 0; attempt < 2 && badness(c) > 0; attempt++) {
+        dim *= Math.min(2.5, Math.max(0.4, (distM + c.blockedM) / c.r.lenM));
+        const c2 = await prep(dim);
+        if (!c2) break;
+        const better = badness(c2) < badness(c) ||
+          (badness(c2) === badness(c) && Math.abs(c2.r.lenM - distM) < Math.abs(c.r.lenM - distM));
+        if (!better) break;
+        c = c2;
       }
-      if (!inTol(r.lenM)) { fails.tol++; return null; }
-      let adoptWps = loopWps(vias);
-      const snipped = snipOldSpurs(r.coords, this.isNew, distM * (1 - buffer));
-      if (snipped) {
-        r = statsFromCoords(snipped);
-        adoptWps = resampleWps(S, snipped, 4);
-      }
-      return { r, adoptWps, overlap: overlapFrac(r.coords) };
+      if (!inTol(c.r.lenM)) { fails.tol++; return null; }
+      return { r: c.r, adoptWps: c.adoptWps, overlap: overlapFrac(c.r.coords) };
     });
 
     const found = await this._pool(jobs, stale, (done) => emit({ loading: true, phase: "loops", done, total }));
@@ -576,5 +599,6 @@
     this._finish(runId, clean.length ? clean : found, { targetKm: distM / 1000, bufferPct });
   };
 
+  SuggestTool._internals = { snipOldSpurs, overlapFrac, statsFromCoords }; // for tests
   global.SuggestTool = SuggestTool;
 })(window);
