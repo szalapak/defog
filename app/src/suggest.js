@@ -24,6 +24,7 @@
     this.map = map;
     this.fogMap = opts.fogMap;
     this.computeGain = opts.computeGain;   // (coords) -> { area, newPct } | null
+    this.isNew = opts.isNew || null;       // (lon,lat) -> true if the point is new ground
     this.onPoints = opts.onPoints || null; // (count) -> UI update
     this.onResults = opts.onResults || null; // (state|null) -> render progress/cards
     this.mode = "p2p";                     // "p2p" | "loop"
@@ -82,15 +83,35 @@
 
   SuggestTool.prototype.clearResults = function () {
     this._runId++; // cancels any in-flight run
-    this.lines.forEach((l) => this.map.removeLayer(l));
+    this.lines.forEach((l) => { this.map.removeLayer(l.solid); this.map.removeLayer(l.dashed); });
     this.lines = []; this.results = []; this.selected = -1;
     if (this.onResults) this.onResults(null);
   };
 
   SuggestTool.prototype.select = function (i) {
     this.selected = i;
-    this.lines.forEach((l, k) => l.setStyle(k === i ? { weight: 6, opacity: 0.95 } : { weight: 4, opacity: 0.35 }));
+    this.lines.forEach((l, k) => {
+      const sel = k === i;
+      l.solid.setStyle({ weight: sel ? 6 : 4, opacity: sel ? 0.95 : 0.65 });
+      l.dashed.setStyle({ weight: sel ? 4.5 : 3, opacity: sel ? 0.9 : 0.55 });
+    });
   };
+
+  // Same split as the drawn route: solid runs where the route breaks new ground,
+  // dashed ("hatched") runs where it crosses ground that's already defogged.
+  function splitRuns(coords, isNew) {
+    const newRuns = [], oldRuns = [];
+    let cur = null, run = null;
+    for (let i = 0; i < coords.length - 1; i++) {
+      const a = coords[i], b = coords[i + 1];
+      const isN = isNew ? isNew((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) : true;
+      if (cur === null) { cur = isN; run = [[a[1], a[0]]]; }
+      else if (isN !== cur) { (cur ? newRuns : oldRuns).push(run); cur = isN; run = [[a[1], a[0]]]; }
+      run.push([b[1], b[0]]);
+    }
+    if (run) (cur ? newRuns : oldRuns).push(run);
+    return { newRuns, oldRuns };
+  }
 
   // Waypoints that reproduce candidate i in the ordinary route editor. Via and loop
   // candidates are exact (same request); BRouter alternatives are approximated by
@@ -197,11 +218,18 @@
     scored.sort((x, y) => y.gain.area - x.gain.area);
     this.results = scored.slice(0, 3);
 
-    this.lines = this.results.map((c, i) =>
-      L.polyline(c.r.coords.map((p) => [p[1], p[0]]), { color: COLORS[i], weight: 4, opacity: 0.85 }).addTo(this.map));
+    this.lines = this.results.map((c, i) => {
+      const runs = splitRuns(c.r.coords, this.isNew);
+      return {
+        solid: L.polyline(runs.newRuns, { color: COLORS[i], weight: 4, opacity: 0.65 }).addTo(this.map),
+        dashed: L.polyline(runs.oldRuns, { color: COLORS[i], weight: 3, opacity: 0.55, dashArray: "2 8", lineCap: "round" }).addTo(this.map)
+      };
+    });
     if (this.lines.length) {
-      let bounds = this.lines[0].getBounds();
-      this.lines.forEach((l) => { bounds = bounds.extend(l.getBounds()); });
+      let bounds = null;
+      this.results.forEach((c) => c.r.coords.forEach((p) => {
+        bounds = bounds ? bounds.extend([p[1], p[0]]) : L.latLngBounds([p[1], p[0]], [p[1], p[0]]);
+      }));
       this.map.fitBounds(bounds, { padding: [30, 30] });
       this.select(0); // best option pre-selected before the cards render
     }

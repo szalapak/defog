@@ -319,6 +319,7 @@
   const suggest = new SuggestTool(map, {
     fogMap,
     computeGain,
+    isNew: cellIsNew, // previews get the same solid-new / hatched-old split as drawn routes
     onPoints: (n) => {
       sugStatus.textContent = suggest.mode === "loop"
         ? (n === 0 ? "Tap the map to set your loop's start." :
