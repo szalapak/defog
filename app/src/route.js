@@ -269,7 +269,22 @@
   };
 
   RouteTool.prototype._indexWaypoints = function () {
-    for (const w of this.wps) w._ri = this._nearestRouteIndex(w.latlng);
+    // Waypoints lie on the routed path in order, so assign each the nearest route vertex
+    // at or after the previous waypoint's. A plain nearest search would map a loop's
+    // closing waypoint (same coords as the start) back to index 0, which then poisons
+    // _insertionIndex's monotonic scan and makes every line-drag append at the end.
+    const c = this.routeCoords;
+    let from = 0;
+    for (const w of this.wps) {
+      let best = from, bd = Infinity;
+      for (let i = from; i < c.length; i++) {
+        const dx = c[i][0] - w.latlng.lng, dy = c[i][1] - w.latlng.lat;
+        const d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; best = i; }
+      }
+      w._ri = best;
+      from = best; // the next waypoint can only sit further along the path
+    }
   };
 
   RouteTool.prototype._stats = function (feat, coords) {
