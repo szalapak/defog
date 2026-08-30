@@ -17,6 +17,20 @@ function makeGain(fogMap, FogParser) {
     return true;
   }
 
+  // Share of the ~30 m corridor stamp around a point that is still fogged.
+  // Street segments are weighted by this, so the reward is area-aligned.
+  function corridorNewFrac(lon, lat) {
+    const r = Math.max(1, Math.round(DEFOG_HALF_M / cellMetersAt(lat)));
+    const c = FogParser.lngLatToCell(lon, lat);
+    const cx0 = Math.floor(c.cx), cy0 = Math.floor(c.cy);
+    let fogged = 0, total = 0;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      total++;
+      if (!fogMap.isVisitedCell(cx0 + dx, cy0 + dy)) fogged++;
+    }
+    return fogged / total;
+  }
+
   function computeGain(coords) {
     if (!fogMap.tileCount || coords.length < 2) return null;
     const cellM = cellMetersAt(coords[Math.floor(coords.length / 2)][1]);
@@ -41,7 +55,7 @@ function makeGain(fogMap, FogParser) {
     return { area: newCells * cellM * cellM, newPct: total > 0 ? 100 * newLen / total : 0 };
   }
 
-  return { cellIsNew, computeGain, cellMetersAt };
+  return { cellIsNew, corridorNewFrac, computeGain, cellMetersAt };
 }
 
 module.exports = { makeGain, DEFOG_HALF_M };

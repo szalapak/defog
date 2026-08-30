@@ -217,6 +217,20 @@
     return true;
   }
 
+  // Share of the ~DEFOG_HALF_M corridor stamp around a point that is still fogged.
+  // The street index weights way segments by this, keeping its reward area-aligned.
+  function corridorNewFrac(lon, lat) {
+    const r = Math.max(1, Math.round(DEFOG_HALF_M / cellMetersAt(lat)));
+    const c = FogParser.lngLatToCell(lon, lat);
+    const cx0 = Math.floor(c.cx), cy0 = Math.floor(c.cy);
+    let fogged = 0, total = 0;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      total++;
+      if (!fogMap.isVisitedCell(cx0 + dx, cy0 + dy)) fogged++;
+    }
+    return fogged / total;
+  }
+
   // What this route would defog: new area (cells in the clear-corridor) + the share of the
   // route's LENGTH that runs through never-visited ground.
   function computeGain(coords) {
@@ -334,6 +348,7 @@
     fogMap,
     computeGain,
     isNew: cellIsNew, // previews get the same solid-new / hatched-old split as drawn routes
+    streets: new StreetIndex({ newFrac: corridorNewFrac }), // candidates chase defoggable area on real ways
     onPoints: (n) => {
       sugStatus.textContent = suggest.mode === "loop"
         ? (n === 0 ? "Tap the map to pick the start location of your loop." :
@@ -366,6 +381,7 @@
     if (s.loading) {
       sugResults.innerHTML = `<div class="muted" style="margin-top:10px">${
         s.phase === "baseline" ? "Finding the fastest route…" :
+        s.phase === "streets" ? "Reading the street map…" :
         s.phase === "loops" ? `Routing loops… ${s.done}/${s.total}` :
         `Exploring detours… ${s.done}/${s.total}`}</div>`;
       return;

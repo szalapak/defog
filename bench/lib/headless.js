@@ -1,12 +1,12 @@
 // Run the app's SuggestTool headless: fake map, pinned markers, cached fetch.
 // Resolves with the tool's final results plus request/timing counters.
 "use strict";
-const { SuggestTool, L } = require("./load.js");
+const { SuggestTool, StreetIndex, L } = require("./load.js");
 const cache = require("./fetch-cache.js");
 
 function pin(lat, lng) { const ll = L.latLng(lat, lng); return { getLatLng: () => ll }; }
 
-// scenario: { mode, a:[lat,lng], b?, distM?, profile, buffer }
+// scenario: { mode, a:[lat,lng], b?, distM?, profile, buffer, noStreets? }
 function runSuggest(fogMap, gain, scenario) {
   cache.install();
   return new Promise((resolve, reject) => {
@@ -16,6 +16,7 @@ function runSuggest(fogMap, gain, scenario) {
       fogMap,
       computeGain: gain.computeGain,
       isNew: gain.cellIsNew,
+      streets: scenario.noStreets ? null : new StreetIndex({ newFrac: gain.corridorNewFrac }),
       onResults: (s) => {
         if (!s || s.loading) return;
         const c = cache.counters();

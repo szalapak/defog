@@ -25,6 +25,7 @@
     this.fogMap = opts.fogMap;
     this.computeGain = opts.computeGain;   // (coords) -> { area, newPct } | null
     this.isNew = opts.isNew || null;       // (lon,lat) -> true if the point is new ground
+    this.streets = opts.streets || null;   // StreetIndex; candidates chase undefogged streets
     this.onPoints = opts.onPoints || null; // (count) -> UI update
     this.onResults = opts.onResults || null; // (state|null) -> render progress/cards
     this.mode = "p2p";                     // "p2p" | "loop"
@@ -182,6 +183,44 @@
     return { kx: 111320 * Math.cos(lat * Math.PI / 180), ky: 110540 };
   }
 
+  // Which street classes matter: on foot everything walkable, on wheels not
+  // footways/paths (also keeps the bigger bike-range downloads sane).
+  function streetKind(profile) { return profile === "hiking-mountain" ? "run" : "bike"; }
+
+  // Defoggable area (m²) reachable via the ways within rM of the point, or
+  // null where street data doesn't cover it. Null means: fall back to fog-only
+  // scoring. Raw fog can't tell a street grid from a lake; this can, and it is
+  // area-weighted so a lone path through virgin meadow scores what it's worth.
+  SuggestTool.prototype._newAreaM2 = function (latlng, rM) {
+    if (!this.streets || !this.streets.covered(latlng.lat, latlng.lng)) return null;
+    return this.streets.newAreaM2(latlng, rM);
+  };
+
+  // Pull a generation via to the most undefogged-street-rich spot within reach,
+  // so loops are born aimed at fogged streets instead of hoping BRouter finds
+  // them. The current spot keeps a bias and distance discounts a candidate, so
+  // the loop holds roughly its intended shape and length.
+  SuggestTool.prototype._snapToNewStreets = function (ll, radiusM) {
+    const base = this._newAreaM2(ll, 200);
+    if (base === null || radiusM < 200) return ll;
+    const { kx, ky } = metresPerDeg(ll.lat);
+    // gentle keep-bias: in dense areas scores are high everywhere, so a strong
+    // bias (tried 1.15) freezes every via in place and the snapping no-ops
+    let best = ll, bs = base * 1.05 + 600;
+    const step = Math.max(150, radiusM / 3);
+    for (let dy = -radiusM; dy <= radiusM; dy += step) {
+      for (let dx = -radiusM; dx <= radiusM; dx += step) {
+        if (!dx && !dy) continue;
+        const p = L.latLng(ll.lat + dy / ky, ll.lng + dx / kx);
+        const m = this._newAreaM2(p, 200);
+        if (m === null) continue;
+        const s = m * (1 - Math.hypot(dx, dy) / (radiusM * 2.2));
+        if (s > bs) { bs = s; best = p; }
+      }
+    }
+    return best;
+  };
+
   // Run jobs (thunks returning a promise) through a small worker pool, reporting progress.
   SuggestTool.prototype._pool = async function (jobs, stale, onTick) {
     const out = [];
@@ -295,15 +334,29 @@
           const d = dm * scale;
           if (d < 150) continue; // not a meaningful detour
           const ll = this._viaPoint(t, side, d);
-          cands.push({ latlng: ll, newness: this._newness(ll), scale, t, side, d });
+          cands.push({ latlng: ll, scale, t, side, d });
         }
       }
     }
-    // Rank by fog within each detour size, then take half from each. Far offsets always
-    // look foggier but often route over the length budget; medium ones fit reliably, and
-    // ranking them together would spend the whole request budget on the far side.
-    const rank = (sc) => cands.filter((c) => c.scale === sc && c.newness >= 0.05)
-      .sort((a, b) => b.newness - a.newness);
+    return cands;
+  };
+
+  // Rank via candidates by defoggable area via ways within 350 m when street
+  // data covers them all, by fog newness otherwise.
+  // Rank within each detour size, then take half from each. Far offsets always
+  // look richer but often route over the length budget; medium ones fit reliably, and
+  // ranking them together would spend the whole request budget on the far side.
+  SuggestTool.prototype._pickVias = function (cands) {
+    for (const c of cands) {
+      c.areaM2 = this._newAreaM2(c.latlng, 350);
+      if (c.areaM2 === null) c.newness = this._newness(c.latlng);
+    }
+    const street = cands.length > 0 && cands.every((c) => c.areaM2 !== null);
+    // floors: below ~2000 m² reachable (or 5% new fog) a detour isn't worth a request
+    const ok = (c) => (street ? c.areaM2 >= 2000 : c.newness >= 0.05);
+    const val = (c) => (street ? c.areaM2 : c.newness);
+    const rank = (sc) => cands.filter((c) => c.scale === sc && ok(c))
+      .sort((a, b) => val(b) - val(a));
     const full = rank(1), med = rank(0.5);
     const take = Math.ceil(MAX_VIAS / 2);
     const picked = full.slice(0, take).concat(med.slice(0, take));
@@ -328,7 +381,16 @@
     if (!base) { emit({ error: true }); return; }
     const budget = base.lenM * (1 + buffer);
 
-    // candidate jobs: BRouter's alternatives + our fog-seeking via-points
+    // Tier 2: fetch street data around the via candidates so ranking can chase
+    // undefogged streets. On any failure, carry on with fog-only scoring.
+    const rawVias = this._viaCandidates(budget);
+    if (this.streets && rawVias.length) {
+      emit({ loading: true, phase: "streets" });
+      try { await this.streets.ensureDiscs(rawVias.map((c) => c.latlng), 500, "run"); } catch (e) {}
+      if (stale()) return;
+    }
+
+    // candidate jobs: BRouter's alternatives + our street/fog-seeking via-points
     const jobs = [];
     for (let idx = 1; idx <= 3; idx++)
       jobs.push(async () => {
@@ -337,7 +399,7 @@
         const mid = r.coords[Math.floor(r.coords.length / 2)];
         return { r, adoptWps: [A, L.latLng(mid[1], mid[0]), B] };
       });
-    for (const v of this._viaCandidates(budget))
+    for (const v of this._pickVias(rawVias))
       jobs.push(async () => {
         // real streets inflate the straight-line ellipse bound, so a via route often
         // overshoots the budget, so pull the via toward the line proportionally and retry
@@ -370,17 +432,29 @@
 
   // ----- loops ------------------------------------------------------------------
 
-  // Rank compass bearings by how foggy the ground out that way is: sample newness at two
-  // ranges along each of 12 bearings, then greedily pick well-separated winners.
+  // Scoring radius for a bearing sample: wide enough to see a neighbourhood,
+  // scaled with the loop so long rides judge whole districts.
+  function bearingRadius(distM) { return Math.min(800, Math.max(300, distM * 0.05)); }
+
+  // Rank compass bearings by how much undefogged STREET lies out that way
+  // (fog-only newness as fallback): sample at two ranges along each of 12
+  // bearings, then greedily pick well-separated winners. Street scoring stops
+  // bearings aiming at rivers, parks and fields that look richly foggy but
+  // hold nothing to defog.
   SuggestTool.prototype._loopBearings = function (S, distM) {
     const { kx, ky } = metresPerDeg(S.lat);
     const at = (thDeg, m) => {
       const th = thDeg * Math.PI / 180;
       return L.latLng(S.lat + (Math.cos(th) * m) / ky, S.lng + (Math.sin(th) * m) / kx);
     };
+    const R = bearingRadius(distM);
+    const score = (p) => {
+      const st = this._newAreaM2(p, R);
+      return st !== null ? st : this._newness(p) * 2 * R * 30; // fallback on a roughly comparable scale
+    };
     const scored = [];
     for (let b = 0; b < 360; b += 30)
-      scored.push({ b, score: (this._newness(at(b, distM * 0.25)) + this._newness(at(b, distM * 0.4))) / 2 });
+      scored.push({ b, score: (score(at(b, distM * 0.25)) + score(at(b, distM * 0.4))) / 2 });
     scored.sort((x, y) => y.score - x.score);
     const picked = [];
     for (const s of scored) {
@@ -401,7 +475,8 @@
       const th = thDeg * Math.PI / 180;
       return L.latLng(S.lat + (Math.cos(th) * m) / ky, S.lng + (Math.sin(th) * m) / kx);
     };
-    return [at(bearingDeg - 45, a), at(bearingDeg, a * Math.SQRT2), at(bearingDeg + 45, a)];
+    return [at(bearingDeg - 45, a), at(bearingDeg, a * Math.SQRT2), at(bearingDeg + 45, a)]
+      .map((v) => this._snapToNewStreets(v, a * 0.3));
   };
 
   // Triangle fallback (2 vias, side D/3.75): used when the square's vias hit somewhere
@@ -412,7 +487,7 @@
       const th = thDeg * Math.PI / 180;
       return L.latLng(S.lat + (Math.cos(th) * side) / ky, S.lng + (Math.sin(th) * side) / kx);
     };
-    return [at(bearingDeg - 30), at(bearingDeg + 30)];
+    return [at(bearingDeg - 30), at(bearingDeg + 30)].map((v) => this._snapToNewStreets(v, side * 0.3));
   };
 
   // Share of the route's length that runs within ~25 m of another, path-distant part of
@@ -536,6 +611,33 @@
     const S = this.a.getLatLng();
     const bufferPct = Math.round(buffer * 100);
     const inTol = (lenM) => Math.abs(lenM - distM) <= buffer * distM;
+
+    // Tier 2: fetch street data first so bearings and vias chase undefogged
+    // streets rather than raw fog. Short loops get one rect around the whole
+    // reach (via snapping needs area coverage); long loops fetch discs around
+    // the bearing sample points only, to keep the download sane. On any
+    // failure, carry on with fog-only scoring; suggestions must never die
+    // because Overpass is busy.
+    if (this.streets) {
+      emit({ loading: true, phase: "streets" });
+      try {
+        const { kx, ky } = metresPerDeg(S.lat);
+        if (distM <= 16000) {
+          const half = distM * 0.45 + 800;
+          await this.streets.ensureRects(
+            [{ s: S.lat - half / ky, n: S.lat + half / ky, w: S.lng - half / kx, e: S.lng + half / kx }],
+            streetKind(profile));
+        } else {
+          const pts = [];
+          for (let b = 0; b < 360; b += 30) for (const f of [0.25, 0.4]) {
+            const th = b * Math.PI / 180;
+            pts.push(L.latLng(S.lat + (Math.cos(th) * distM * f) / ky, S.lng + (Math.sin(th) * distM * f) / kx));
+          }
+          await this.streets.ensureDiscs(pts, bearingRadius(distM) + 200, streetKind(profile));
+        }
+      } catch (e) {}
+      if (stale()) return;
+    }
 
     const bearings = this._loopBearings(S, distM);
     const total = bearings.length;

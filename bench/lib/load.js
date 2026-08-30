@@ -9,6 +9,7 @@ const zlib = require("zlib");
 global.window = global;
 require("./leaflet-stub.js"); // defines global.L before suggest.js needs it
 require(path.join(__dirname, "..", "..", "app", "src", "parser.js"));
+require(path.join(__dirname, "..", "..", "app", "src", "streets.js"));
 require(path.join(__dirname, "..", "..", "app", "src", "suggest.js"));
 
 function loadSync(dir) {
@@ -25,4 +26,4 @@ function loadSync(dir) {
   return { fogMap, bad };
 }
 
-module.exports = { loadSync, FogParser: global.FogParser, SuggestTool: global.SuggestTool, L: global.L };
+module.exports = { loadSync, FogParser: global.FogParser, SuggestTool: global.SuggestTool, StreetIndex: global.StreetIndex, L: global.L };

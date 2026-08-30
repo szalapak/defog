@@ -35,8 +35,11 @@ for that feature (not your fog data): **route planning and route suggestions** s
 waypoints to the public [BRouter](https://brouter.de) server to snap them to roads; for
 suggestions this includes a handful of automatically generated candidate points near your
 chosen area (their placement is influenced by where your fog is, but the fog itself is
-never sent), and **"Maps ↗"** opens your
-waypoints in Google Maps. As with any web map, basemap tiles are fetched from their providers
+never sent); route suggestions also fetch the **street map of the area around your pins**
+from the public [Overpass API](https://overpass-api.de) (OpenStreetMap), which only sees
+bounding boxes, the same class of information the basemap tile servers already get, and
+the streets are compared against your fog entirely on your device; and **"Maps ↗"** opens
+your waypoints in Google Maps. As with any web map, basemap tiles are fetched from their providers
 (OpenStreetMap / CARTO / CyclOSM), which reveals the map area you're viewing to them.
 The site also counts visits with [GoatCounter](https://www.goatcounter.com/), a
 privacy-friendly, cookie-less counter (page views only; no personal data, no tracking
