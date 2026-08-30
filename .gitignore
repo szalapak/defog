@@ -11,5 +11,9 @@ Thumbs.db
 # Design scratch (mockups, screenshots)
 design/
 
+# Benchmark caches (BRouter/Overpass responses) and result dumps: local only
+bench/cache/
+bench/out/
+
 # Local-only Claude settings and scratch config
 .claude/
