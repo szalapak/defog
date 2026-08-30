@@ -1,5 +1,5 @@
 // "Surprise me" routing: suggest up to 3 routes that maximise defogging.
-// Two modes — point-to-point (A → B) and loop (start + target distance).
+// Two modes: point-to-point (A → B) and loop (start + target distance).
 // Candidates come from BRouter (its own alternatives, plus fog-seeking via-points /
 // fog-biased loop bearings we generate) and every candidate is scored client-side with
 // the caller's defog-gain function. The fog itself never leaves the device; only
@@ -10,7 +10,7 @@
   const MAX_VIAS = 6;           // fog-seeking detour candidates per p2p run
   const MAX_LOOPS = 6;          // loop bearings tried per run
   const CONCURRENCY = 3;        // parallel BRouter requests (be kind to the public server)
-  // Same neon family as the drawn route (#ff2d55): red · pink · orange — pops against
+  // Same neon family as the drawn route (#ff2d55): red · pink · orange, which pops against
   // the fog, deliberately far from the blue/purple/slate fog swatches.
   const COLORS = ["#ff2d55", "#ff4fa3", "#ff8c2d"];
 
@@ -56,7 +56,7 @@
   SuggestTool.prototype.pointsNeeded = function () { return this.mode === "loop" ? 1 : 2; };
 
   SuggestTool.prototype._place = function (latlng) {
-    if (this.a && (this.mode === "loop" || this.b)) return; // all pins set — drag to adjust
+    if (this.a && (this.mode === "loop" || this.b)) return; // all pins set, drag to adjust
     const isA = !this.a;
     const m = L.marker(latlng, { draggable: true, icon: pinIcon(isA ? "sugA" : "sugB", isA ? "A" : "B") }).addTo(this.map);
     m.on("dragend", () => this.clearResults());
@@ -145,7 +145,7 @@
     } catch (e) { return null; }
   };
 
-  // Share of never-visited cells within ~100 m of a point — used to steer candidates
+  // Share of never-visited cells within ~100 m of a point, used to steer candidates
   // away from ground the user has already covered.
   SuggestTool.prototype._newness = function (latlng) {
     if (!this.fogMap.tileCount) return 1;
@@ -161,7 +161,7 @@
     return 1 - visited / total;
   };
 
-  // Coarse geometry fingerprint (8 sampled points on a ~100 m grid) to drop near-duplicates —
+  // Coarse geometry fingerprint (8 sampled points on a ~100 m grid) to drop near-duplicates,
   // e.g. a via candidate that snapped onto the same roads as a BRouter alternative.
   function sig(coords) {
     const out = [];
@@ -205,7 +205,7 @@
     if (runId !== this._runId) return;
     const emit = (s) => { if (this.onResults) this.onResults(s); };
     if (!cands.length) { emit(Object.assign({ empty: true }, extra)); return; }
-    // Score first, rank, THEN dedupe — near-identical routes must collapse onto the
+    // Score first, rank, THEN dedupe, because near-identical routes must collapse onto the
     // best-gaining of the pair, not whichever happened to be scored first.
     let scored = cands.map((c) => Object.assign({
       s: sig(c.r.coords),
@@ -300,7 +300,7 @@
       }
     }
     // Rank by fog within each detour size, then take half from each. Far offsets always
-    // look foggier but often route over the length budget; medium ones fit reliably —
+    // look foggier but often route over the length budget; medium ones fit reliably, and
     // ranking them together would spend the whole request budget on the far side.
     const rank = (sc) => cands.filter((c) => c.scale === sc && c.newness >= 0.05)
       .sort((a, b) => b.newness - a.newness);
@@ -340,11 +340,11 @@
     for (const v of this._viaCandidates(budget))
       jobs.push(async () => {
         // real streets inflate the straight-line ellipse bound, so a via route often
-        // overshoots the budget — pull the via toward the line proportionally and retry
+        // overshoots the budget, so pull the via toward the line proportionally and retry
         let ll = v.latlng;
         let r = await this._route([A, ll, B], profile, 0);
         if (r && r.lenM > budget && r.lenM < budget * 1.8 && r.lenM > base.lenM) {
-          // 0.95: aim just inside the budget — the best detours live right at the edge
+          // 0.95: aim just inside the budget, because the best detours live right at the edge
           const shrink = Math.max(0.2, Math.min(0.9, 0.95 * (budget - base.lenM) / (r.lenM - base.lenM)));
           const d = v.d * shrink;
           const ll2 = d >= 120 ? this._viaPoint(v.t, v.side, d) : null;
@@ -405,7 +405,7 @@
   };
 
   // Triangle fallback (2 vias, side D/3.75): used when the square's vias hit somewhere
-  // BRouter can't route from (water, restricted areas) — fewer points, fewer chances.
+  // BRouter can't route from (water, restricted areas). Fewer points, fewer chances to fail.
   SuggestTool.prototype._loopViasTri = function (S, bearingDeg, side) {
     const { kx, ky } = metresPerDeg(S.lat);
     const at = (thDeg) => {
@@ -416,7 +416,7 @@
   };
 
   // Share of the route's length that runs within ~25 m of another, path-distant part of
-  // itself — high values mean out-and-back spurs rather than a proper loop.
+  // itself. High values mean out-and-back spurs rather than a proper loop.
   function overlapFrac(coords) {
     const { kx, ky } = metresPerDeg(coords.length ? coords[0][1] : 0);
     const d2 = (p, q) => { const dx = (p.x - q.x), dy = (p.y - q.y); return dx * dx + dy * dy; };
@@ -443,11 +443,11 @@
 
   // Cut "there and back" excursions that don't pull their weight: an excursion is a
   // stretch that returns to within 60 m of where it left the route. If the defog area
-  // it contributes per metre is under 40% of the route's overall rate, splice it out —
-  // that catches dead-end re-walks of covered ground (rate ≈ 0) and marginal wiggles,
+  // it contributes per metre is under 40% of the route's overall rate, splice it out.
+  // That catches dead-end re-walks of covered ground (rate ≈ 0) and marginal wiggles,
   // while keeping spurs INTO fog, which are ugly but often the point of the suggestion.
   // Returns { coords, blockedM }: coords is the spliced geometry (null if nothing was
-  // cut) and blockedM the length of cuts wanted but skipped to respect minLenM — the
+  // cut) and blockedM the length of cuts wanted but skipped to respect minLenM, so the
   // caller can regrow the loop by that much and retry.
   function snipOldSpurs(coords, computeGain, minLenM) {
     const none = { coords: null, blockedM: 0 };
@@ -509,7 +509,7 @@
     return { coords, lenM: Math.round(len), ascent: Math.round(asc), descent: Math.round(desc) };
   }
 
-  // Evenly spaced points along a snipped route's cleaned shape — used as adoption
+  // Evenly spaced points along a snipped route's cleaned shape, used as adoption
   // waypoints so BRouter follows the same streets instead of re-growing the spur.
   function resampleMids(coords, n) {
     const { kx, ky } = metresPerDeg(coords[0][1]);
@@ -550,7 +550,7 @@
     const jobs = bearings.map((bearing) => async () => {
       let mk = (d) => this._loopVias(S, bearing, d);
       // route + snip in one step, so tolerance and the rescale-retry both judge the
-      // CLEANED length — a loop whose snips pull it under target gets regrown, not binned
+      // CLEANED length, so a loop whose snips pull it under target gets regrown, not binned
       const prep = async (d) => {
         const vias = mk(d);
         const raw = await this._route(loopWps(vias), profile, 0);
@@ -568,7 +568,7 @@
         c = await prep(dim);
       }
       if (!c) { fails.server++; return null; }
-      // retry when out of tolerance OR a wanted snip was blocked by the tolerance floor —
+      // retry when out of tolerance OR a wanted snip was blocked by the tolerance floor;
       // regrowing by the blocked amount makes the cut affordable on the second pass
       const badness = (x) => (inTol(x.r.lenM) ? 0 : 2) + (x.blockedM > 0 ? 1 : 0);
       // up to two improvement passes: a far-off first shot may need one rescale to reach
@@ -589,7 +589,7 @@
     const found = await this._pool(jobs, stale, (done) => emit({ loading: true, phase: "loops", done, total }));
     if (stale()) return;
     if (!found.length && fails.server > 0 && fails.tol === 0) {
-      // nothing routed at all — a server problem, not a tolerance problem; say so
+      // nothing routed at all, a server problem, not a tolerance problem; say so
       emit({ empty: true, reason: "server", targetKm: distM / 1000, bufferPct });
       return;
     }

@@ -27,7 +27,7 @@
     // fog-aware overlays: solid red where the route breaks new ground, dashed ("hatched")
     // red where you've already defogged.
     // Invisible, extra-thick "hit" line beneath the visible ones so the route is easy to
-    // grab — especially with a fingertip. pointer-events:stroke makes it catch pointers
+    // grab, especially with a fingertip. pointer-events:stroke makes it catch pointers
     // along its full width even though it's completely transparent.
     this.hit = L.polyline([], { weight: COARSE ? 30 : 16, opacity: 0, interactive: true }).addTo(map);
     const hitEl = this.hit.getElement && this.hit.getElement();
@@ -107,12 +107,25 @@
   RouteTool.prototype.removeAt = function (i) { if (this.wps[i]) this._remove(this.wps[i]); };
   RouteTool.prototype.undo = function () { if (this.wps.length) this._remove(this.wps[this.wps.length - 1]); };
 
-  // Replace all waypoints at once (used when adopting a suggested route) — one recalc.
+  // Replace all waypoints at once (used when adopting a suggested route), in one recalc.
   RouteTool.prototype.setWaypoints = function (latlngs) {
     this.wps.forEach((w) => this.map.removeLayer(w.marker));
     this.wps = latlngs.map((ll, i) => this._makeWp(L.latLng(ll), i));
     this._emitWps();
     this._recalc();
+  };
+
+  // Flip the direction of travel. The waypoints are reversed and the route is asked for
+  // again rather than the old geometry being played backwards, so BRouter picks the legs
+  // that are right for the new direction (one-ways, and the correct side of a road that
+  // carries a separate path each way).
+  RouteTool.prototype.reverse = function () {
+    if (this.wps.length < 2) return false;
+    this.wps.reverse();
+    this._relabel();
+    this._emitWps();
+    this._recalc();
+    return true;
   };
 
   RouteTool.prototype.clear = function () {

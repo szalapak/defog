@@ -16,7 +16,8 @@ uploaded anywhere.
 - **Fog look:** shade visited/unexplored, colour, opacity, and **Widen** to fatten thin tracks.
 - **Live "% defogged"** of the current view in the header.
 - **Route planning** snapped to real roads via [BRouter](https://brouter.de) (bike / road /
-  walk / car / rail): draggable & line-insertable waypoints, distance + elevation profile,
+  walk / car / rail): draggable & line-insertable waypoints, a **Reverse** button that
+  re-routes the trip the other way round, distance + elevation profile,
   and an estimate of the **new area a route would defog**. Export the route as GPX / KML,
   or open it in Google Maps. km/mi units.
 - **Suggested routes ("surprise me"):** Pick **A → B** and get up
@@ -28,7 +29,7 @@ uploaded anywhere.
 
 ## Privacy
 
-Your Fog of World data is parsed and drawn in your browser — it is never sent
+Your Fog of World data is parsed and drawn in your browser and is never sent
 to any server. Two features do make outbound requests, and only with the coordinates needed
 for that feature (not your fog data): **route planning and route suggestions** send
 waypoints to the public [BRouter](https://brouter.de) server to snap them to roads; for

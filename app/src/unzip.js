@@ -1,10 +1,10 @@
-// Minimal in-browser ZIP reader — enough to open a Fog of World backup .zip.
+// Minimal in-browser ZIP reader, enough to open a Fog of World backup .zip.
 // Reads the central directory (authoritative for sizes/offsets), then inflates each
 // entry. Supports the two methods real backups use: stored (0) and deflate (8),
 // with pako.inflateRaw for the latter. Handles ZIP64 for the archive that needs it
 // (a big traveller's Sync folder can exceed the 16-bit entry count / 4 GB fields).
 //
-// Returns [{ name, data: Uint8Array }] — one entry per file (directories skipped).
+// Returns [{ name, data: Uint8Array }], one entry per file (directories skipped).
 // Each returned `data` is still the raw file content; for fog tiles that content is
 // itself zlib-compressed, so the caller runs pako.inflate on it in turn.
 (function (global) {
@@ -78,7 +78,7 @@
       p += 46 + nameLen + extraLen + commentLen;
       if (name.endsWith("/")) continue; // directory entry
 
-      // The central directory doesn't give the data offset directly — read the local
+      // The central directory doesn't give the data offset directly, so read the local
       // header (whose name/extra lengths may differ) to find where the bytes start.
       if (dv.getUint32(localOffset, true) !== SIG_LOCAL) continue;
       const lNameLen = dv.getUint16(localOffset + 26, true);

@@ -94,7 +94,7 @@
     const parts = [
       '<?xml version="1.0" encoding="UTF-8"?>',
       '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>',
-      "<name>FogToMaps — " + (invert ? "unexplored" : "explored") + "</name>",
+      "<name>FogToMaps: " + (invert ? "unexplored" : "explored") + "</name>",
       '<Style id="f"><LineStyle><color>00000000</color><width>0</width></LineStyle>' +
         "<PolyStyle><color>" + color + "</color></PolyStyle></Style>"
     ];

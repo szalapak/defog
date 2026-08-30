@@ -60,6 +60,15 @@
     label.file.primary:hover { color: #fff; filter: brightness(1.06); }
     label.file input { display: none; }
     .muted { color: var(--muted); font-size: 12px; }
+
+    /* small "?" chip that toggles an inline explanation */
+    .qm { width: 19px; height: 19px; padding: 0; flex: 0 0 auto; border-radius: 50%;
+      border: 1px solid var(--line2); background: #fff; color: var(--muted);
+      font-size: 11px; line-height: 1; }
+    .qm:hover { border-color: var(--accent); color: var(--accent); }
+    .qm[aria-expanded="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .help { margin: 2px 0 8px; line-height: 1.55; }
+    .help b { color: var(--ink); font-weight: 700; }
     details { margin: 8px 0; font-size: 12.5px; }
     details summary { cursor: pointer; color: var(--accent); list-style: none; }
     details summary::marker { content: ""; }
@@ -199,13 +208,18 @@
           </div>
           <details>
             <summary>Where's my Sync folder?</summary>
-            <p>Fog of World keeps a folder named <b>Sync</b> full of small files — point the folder picker at it.</p>
+            <p>Fog of World keeps a folder named <b>Sync</b> full of small files. Point the folder picker at it.</p>
             <p><b>Dropbox sync:</b> <code>Dropbox/Apps/Fog of World/Sync</code>.<br>
                <b>OneDrive sync:</b> the <code>Fog of World/Sync</code> folder in your OneDrive.<br>
                <b>Otherwise:</b> in Fog of World open <b>Settings → Data / Backup</b>, export a backup, and use the <b>Sync</b> folder inside it.</p>
-            <p><b>On a phone?</b> Folder-picking is unreliable, and files kept only in Google Drive / iCloud may fail to download when picked. Easiest: keep your backup as a <b>.zip</b> and load it with the “…or a .zip” button — no unzipping needed.</p>
+            <p><b>On a phone?</b> Folder-picking is unreliable, and files kept only in Google Drive / iCloud may fail to download when picked. Easiest: load your backup as a <b>.zip</b> with the “…or a .zip” button, no unzipping needed.</p>
+            <p><b>Getting that .zip onto a phone:</b> the Drive / OneDrive apps won’t let you download a whole folder. Open
+               <a href="https://drive.google.com" target="_blank" rel="noopener">drive.google.com</a> or
+               <a href="https://onedrive.live.com" target="_blank" rel="noopener">onedrive.live.com</a> in your phone’s browser and
+               switch it to <b>desktop mode</b> (Chrome: <b>⋮ → Desktop site</b>; Safari: <b>ᴀA → Request Desktop Website</b>).
+               Then long-press the <b>Fog of World</b> folder, choose <b>Download</b>, and the site zips it up for you. Load the file it gives you with the “…or a .zip” button.</p>
           </details>
-          <div class="muted" id="loadStatus">Your fog is read on your device — it is never uploaded.</div>
+          <div class="muted" id="loadStatus">Your fog is read on your device and is never uploaded.</div>
 
           <h4>2 · Fog look</h4>
           <div class="row">Shade
@@ -225,6 +239,13 @@
               <span id="widenVal">1</span>
               <button id="widenPlus" class="step" title="Wider">+</button>
             </span>
+            <button id="widenHelp" class="qm" type="button" aria-expanded="false"
+                    aria-controls="widenHelpText" title="What is Widen?">?</button>
+          </div>
+          <div class="muted help" id="widenHelpText" style="display:none">
+            Fattens the drawn tracks so thin ones stay visible when you zoom out.
+            It only changes how the fog looks here, never your Fog of World data
+            or the routes you get. Turn it down to 0 to see your fog exactly as recorded.
           </div>
           <div class="row">Basemap
             <select id="basemap" class="grow">
@@ -277,8 +298,9 @@
               <button id="drawToggle" class="act">Start drawing</button>
               <button id="undo" class="ghost">Undo</button>
               <button id="clear" class="ghost">Clear</button>
+              <button id="reverse" class="ghost" title="Route it the other way round" disabled>Reverse</button>
             </div>
-            <div class="muted" id="routeHint">Tap the map to drop waypoints. Drag the line to bend it, drag a pin to move it, tap a pin to remove it.</div>
+            <div class="muted" id="routeHint">Hit Start drawing, then tap the map to drop waypoints. Drag the line to bend it, drag a pin to move it, tap a pin to remove it.</div>
           </div>
 
           <div id="sugPanel" style="display:none">
@@ -288,7 +310,7 @@
                 <button data-m="loop">Loop</button>
               </span>
             </div>
-            <div class="muted" id="sugStatus">Tap the map to set your start.</div>
+            <div class="muted" id="sugStatus">Tap the map to pick the start location.</div>
             <div class="row" id="sugDistRow" style="display:none">Distance
               <input type="number" id="sugDist" min="1" step="0.5" value="10" />
               <span class="muted" id="sugDistUnit">km</span>
@@ -299,12 +321,22 @@
                 <button data-b="15" class="active">+15%</button>
                 <button data-b="30">+30%</button>
               </span>
+              <button id="sugBufHelp" class="qm" type="button" aria-expanded="false"
+                      aria-controls="sugBufHelpText" title="What is Buffer?">?</button>
+            </div>
+            <div class="muted help" id="sugBufHelpText" style="display:none">
+              How much further you’re willing to go to defog more.
+              <br><b>A &rarr; B:</b> how much you’ll add to the fastest route.
+              At +15%, a 20&nbsp;km trip can stretch to 23&nbsp;km.
+              <br><b>Loop:</b> how much further you’re willing to go beyond the target.
+              At +15%, a 10&nbsp;km target gives you loops of 8.5 to 11.5&nbsp;km.
+              <br>Pick a bigger buffer to reach more new ground, at the cost of a longer route.
             </div>
             <div class="row" style="margin-top:10px;">
               <button id="sugGo" class="act" disabled>Suggest routes</button>
               <button id="sugReset" class="ghost">Reset</button>
             </div>
-            <div class="muted" id="sugFogHint" style="display:none">Load your fog first — suggestions are ranked by how much they'd defog.</div>
+            <div class="muted" id="sugFogHint" style="display:none">Load your fog first, so routes can be ranked by how much they'd defog.</div>
             <div id="sugResults"></div>
           </div>
 

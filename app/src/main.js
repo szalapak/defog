@@ -2,6 +2,17 @@
 (function () {
   const $ = (id) => document.getElementById(id);
 
+  // A "?" chip that folds its explanation open underneath the control it labels.
+  function wireHelp(btnId, textId) {
+    const btn = $(btnId), text = $(textId);
+    btn.addEventListener("click", () => {
+      const open = text.style.display === "none";
+      text.style.display = open ? "" : "none";
+      btn.setAttribute("aria-expanded", String(open));
+    });
+  }
+  wireHelp("widenHelp", "widenHelpText");
+
   const map = L.map("map", { center: [50, 15], zoom: 4, worldCopyJump: false });
   map.createPane("fog");
   map.getPane("fog").style.zIndex = 350;
@@ -88,7 +99,7 @@
 
   // ---- "% defogged" of the current view ---------------------------------------
   const hintEl = $("hint"), defogEl = $("defog"), defogPct = $("defogPct");
-  // Always show two significant figures, however small the value — so a whole-world view
+  // Always show two significant figures, however small the value, so a whole-world view
   // reads e.g. "0.00000056%" instead of collapsing to "0%". (0 stays "0%", 100 stays "100%".)
   function fmtPct(p) {
     if (!(p > 0)) return "0%";
@@ -100,7 +111,7 @@
     if (!fogMap.tileCount) { hintEl.style.display = ""; defogEl.style.display = "none"; return; }
     hintEl.style.display = "none"; defogEl.style.display = "flex";
     // Exact count of defogged cells in the visible Mercator rectangle / total cells in it.
-    // (Counting real cells — not a sampled grid — so tiny world-view fractions stay accurate.)
+    // (Counting real cells, not a sampled grid, so tiny world-view fractions stay accurate.)
     const b = map.getBounds(), WC = FogParser.WORLD_CELLS;
     const nw = FogParser.lngLatToCell(b.getWest(), b.getNorth());
     const se = FogParser.lngLatToCell(b.getEast(), b.getSouth());
@@ -123,7 +134,7 @@
     if (b) map.fitBounds(b, { padding: [20, 20] });
     setLoad(`${fogMap.tileCount} tiles loaded ✓`);
     updateDefog();
-    syncSug(); // fog just arrived — the Suggest button can wake up
+    syncSug(); // fog just arrived, so the Suggest button can wake up
   }
   async function loadFromInput(fileList) {
     const files = Array.from(fileList); if (!files.length) return;
@@ -137,11 +148,11 @@
     }
     if (ok > 0) {
       finishLoad();
-      if (readErr > 0) setLoad(`${fogMap.tileCount} tiles loaded ✓ — ${readErr} file${readErr > 1 ? "s" : ""} couldn't be read (files kept only in the cloud aren't downloaded — try the .zip instead).`);
+      if (readErr > 0) setLoad(`${fogMap.tileCount} tiles loaded ✓, but ${readErr} file${readErr > 1 ? "s" : ""} couldn't be read (files kept only in the cloud aren't downloaded, so try the .zip instead).`);
     } else if (readErr > 0) {
-      setLoad("Couldn't read the files — if this folder lives in Google Drive or iCloud, it may not be downloaded to the phone. Download your backup and load the .zip instead.");
+      setLoad("Couldn't read the files. If this folder lives in Google Drive or iCloud, it may not be downloaded to the phone. Download your backup and load the .zip instead.");
     } else {
-      setLoad("No fog tiles found — did you pick the Sync folder?");
+      setLoad("No fog tiles found. Did you pick the Sync folder?");
     }
   }
   $("folder").addEventListener("change", (e) => loadFromInput(e.target.files));
@@ -151,7 +162,7 @@
     setLoad("Reading .zip…");
     let entries;
     try { entries = FogZip.unzip(await file.arrayBuffer()); }
-    catch (e) { setLoad("Couldn't open that .zip — is it a Fog of World backup?"); return; }
+    catch (e) { setLoad("Couldn't open that .zip. Is it a Fog of World backup?"); return; }
     let ok = 0, i = 0;
     for (const ent of entries) {
       const base = ent.name.split(/[\\/]/).pop(); // tile filenames live under Sync/ inside the zip (tolerate \ or /)
@@ -159,17 +170,18 @@
       if (++i % 200 === 0) setLoad(`Decoding… ${i}/${entries.length}`);
     }
     if (ok > 0) finishLoad();
-    else setLoad("No fog tiles found in that .zip — make sure it contains your Sync folder.");
+    else setLoad("No fog tiles found in that .zip. Make sure it contains your Sync folder.");
   }
   $("zip").addEventListener("change", (e) => loadFromZip(e.target.files[0]));
 
   // ---- route planning ---------------------------------------------------------
   const exportGpxBtn = $("exportGpx"), exportKmlBtn = $("exportKml"), gmapsBtn = $("openGmaps");
   const drawBtn = $("drawToggle"), statsWrap = $("statsWrap"), routeHint = $("routeHint");
+  const reverseBtn = $("reverse");
   const elevEl = $("elev"), elevHead = $("elevHead"), wpListEl = $("wpList"), wpHead = $("wpHead");
   const ELEV_MODES = new Set(["trekking", "fastbike", "hiking-mountain"]);
   const MODE_LABEL = { trekking: "bike route", fastbike: "road bike route", "hiking-mountain": "walk", "car-fast": "car route", rail: "rail route", shortest: "direct line" };
-  const IDLE = "Tap the map to drop waypoints. Drag the line to bend it, drag a pin to move it, tap a pin to remove it.";
+  const IDLE = "Hit Start drawing, then tap the map to drop waypoints. Drag the line to bend it, drag a pin to move it, tap a pin to remove it.";
   let profile = "trekking";
   const DEFOG_HALF_M = 15; // assumed half-width of the corridor Fog of World clears as you travel
   let units = localStorage.getItem("f2m_units") || "metric";
@@ -195,7 +207,7 @@
   const cellMetersAt = (lat) => (40075016.686 / FogParser.WORLD_CELLS) * Math.cos(lat * Math.PI / 180);
 
   // Is this point on genuinely new ground? True only if NO already-visited cell sits within
-  // the ~DEFOG_HALF_M corridor — so weaving a cell off a road you've done doesn't read as new.
+  // the ~DEFOG_HALF_M corridor, so weaving a cell off a road you've done doesn't read as new.
   function cellIsNew(lon, lat) {
     const r = Math.max(1, Math.round(DEFOG_HALF_M / cellMetersAt(lat)));
     const c = FogParser.lngLatToCell(lon, lat);
@@ -241,6 +253,7 @@
   }
 
   function renderWps(list) {
+    reverseBtn.disabled = list.length < 2;
     wpHead.style.display = list.length ? "" : "none";
     wpListEl.innerHTML = "";
     list.forEach((ll, i) => {
@@ -297,8 +310,8 @@
     onChange: (s) => {
       if (!s) { clearRouteInfo(IDLE); setExports(false); return; }
       if (s.loading) { routeHint.textContent = `Routing ${s.points} waypoints…`; routeHint.style.display = ""; return; }
-      if (s.error) { clearRouteInfo("Routing server unreachable — showing a straight line."); setExports(route.routeCoords.length >= 2); return; }
-      if (s.km == null) { clearRouteInfo(`${s.points} waypoint${s.points > 1 ? "s" : ""} — add one more to route.`); setExports(false); return; }
+      if (s.error) { clearRouteInfo("Couldn't reach the routing server, so this is a straight line for now."); setExports(route.routeCoords.length >= 2); return; }
+      if (s.km == null) { clearRouteInfo(`${s.points} waypoint${s.points > 1 ? "s" : ""}. Add one more to get a route.`); setExports(false); return; }
       lastStats = s; lastGain = computeGain(route.routeCoords);
       renderStats();
       routeHint.style.display = "none";
@@ -311,6 +324,7 @@
   const sugStatus = $("sugStatus"), sugGo = $("sugGo"), sugReset = $("sugReset");
   const sugFogHint = $("sugFogHint"), sugResults = $("sugResults");
   const sugModeSeg = $("sugModeSeg"), sugBufSeg = $("sugBufSeg");
+  wireHelp("sugBufHelp", "sugBufHelpText");
   const sugDistRow = $("sugDistRow"), sugDist = $("sugDist"), sugDistUnit = $("sugDistUnit");
   let lastSug = null;
   let sugBuffer = parseInt(localStorage.getItem("f2m_sugbuf") || "15", 10);
@@ -322,11 +336,11 @@
     isNew: cellIsNew, // previews get the same solid-new / hatched-old split as drawn routes
     onPoints: (n) => {
       sugStatus.textContent = suggest.mode === "loop"
-        ? (n === 0 ? "Tap the map to set your loop's start." :
-           "Start set — drag the pin to adjust, tap it to remove it.")
-        : (n === 0 ? "Tap the map to set your start." :
-           n === 1 ? "Now tap your destination." :
-           "Start & end set — drag the pins to adjust, tap one to remove it.");
+        ? (n === 0 ? "Tap the map to pick the start location of your loop." :
+           "Start is set. Hit Suggest routes below. You can drag the pin to move it, or tap to remove it.")
+        : (n === 0 ? "Tap the map to pick the start location." :
+           n === 1 ? "Now tap where you want to finish." :
+           "Start and finish are set. Hit Suggest routes below. You can drag a pin to move it, or tap to remove it.");
       if (n >= suggest.pointsNeeded()) sidebar.classList.add("open"); // mobile: bring the panel back up
       syncSug();
     },
@@ -357,22 +371,22 @@
       return;
     }
     if (s.error) {
-      sugResults.innerHTML = `<div class="muted" style="margin-top:10px">Routing server unreachable — try again in a moment.</div>`;
+      sugResults.innerHTML = `<div class="muted" style="margin-top:10px">Couldn't reach the routing server. Try again in a moment.</div>`;
       return;
     }
     if (s.empty) {
       sugResults.innerHTML = `<div class="muted" style="margin-top:10px">${
         s.reason === "defogged"
-          ? "Nothing left to defog around here — every candidate route runs through ground you've already covered. Try a different area" + (s.targetKm != null ? " or a longer distance." : " or a bigger buffer.")
+          ? "You've already covered the ground around here. Every route tried runs over defogged territory. Try a different area" + (s.targetKm != null ? " or a longer distance." : " or a bigger buffer.")
           : s.reason === "server"
-          ? "The routing server didn't return any routes — it may be busy right now, or this start may be hard to route from. Try again in a minute, or move the start pin."
-          : `No loops landed within ±${s.bufferPct}% of ${fmtDist(s.targetKm)} — try a bigger buffer or a different distance.`}</div>`;
+          ? "The routing server didn't return any routes. It may be busy right now, or this start may be hard to route from. Try again in a minute, or move the start pin."
+          : `No loops landed within ±${s.bufferPct}% of ${fmtDist(s.targetKm)}. Try a bigger buffer or a different distance.`}</div>`;
       return;
     }
     const isLoop = s.targetKm != null;
     const header = isLoop
-      ? `Loops near ${fmtDist(s.targetKm)} (±${s.bufferPct}%), ranked by defogging — tap to preview:`
-      : `Best defogging within ${fmtDist(s.baseKm * (1 + s.bufferPct / 100))} (fastest + ${s.bufferPct}%) — tap to preview:`;
+      ? `Loops near ${fmtDist(s.targetKm)} (±${s.bufferPct}%), ranked by defogging. Tap one to preview:`
+      : `Your best options within ${fmtDist(s.baseKm * (1 + s.bufferPct / 100))} (the fastest route plus ${s.bufferPct}%). Tap one to preview:`;
     const deltaLabel = (c) => {
       if (!isLoop) return c.isBase ? "the fastest route" : "+" + fmtDist(c.deltaKm) + " extra";
       return (c.deltaKm >= 0 ? "+" : "−") + fmtDist(Math.abs(c.deltaKm)) + " vs target";
@@ -475,6 +489,9 @@
   });
   $("undo").addEventListener("click", () => route.undo());
   $("clear").addEventListener("click", () => route.clear());
+  // Reverse re-routes from the flipped waypoints rather than replaying the line backwards,
+  // so BRouter picks the legs that suit the new direction.
+  reverseBtn.addEventListener("click", () => route.reverse());
   exportGpxBtn.addEventListener("click", () => route.downloadGPX());
   exportKmlBtn.addEventListener("click", () => route.downloadKML());
   gmapsBtn.addEventListener("click", () => { const u = route.googleMapsUrl(); if (u) window.open(u, "_blank", "noopener"); });

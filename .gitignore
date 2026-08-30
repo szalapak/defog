@@ -1,4 +1,4 @@
-# Personal Fog of World location data — NEVER commit (each user loads their own)
+# Personal Fog of World location data. NEVER commit (each user loads their own)
 Sync/
 *.mldx
 
@@ -11,5 +11,5 @@ Thumbs.db
 # Design scratch (mockups, screenshots)
 design/
 
-# Local-only Claude settings
-.claude/settings.local.json
+# Local-only Claude settings and scratch config
+.claude/
