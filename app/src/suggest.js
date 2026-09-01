@@ -187,6 +187,14 @@
   // footways/paths (also keeps the bigger bike-range downloads sane).
   function streetKind(profile) { return profile === "hiking-mountain" ? "run" : "bike"; }
 
+  // The graph planner searches the fetched street network directly for high-
+  // defog loops and walks. Built lazily, rebuilt only when new streets arrive.
+  SuggestTool.prototype._getPlanner = function () {
+    if (!this.streets || !global.GraphPlanner || !this.streets.ways.length) return null;
+    if (!this._planner) this._planner = new global.GraphPlanner(this.streets, this.streets.newFrac);
+    return this._planner;
+  };
+
   // Defoggable area (m²) reachable via the ways within rM of the point, or
   // null where street data doesn't cover it. Null means: fall back to fog-only
   // scoring. Raw fog can't tell a street grid from a lake; this can, and it is
@@ -253,7 +261,10 @@
     // a route that breaks <1% new ground isn't a suggestion, it's a re-walk
     scored = scored.filter((c) => c.gain.area > 0 && c.gain.newPct >= 1);
     if (!scored.length) { emit(Object.assign({ empty: true, reason: "defogged" }, extra)); return; }
-    scored.sort((x, y) => y.gain.area - x.gain.area);
+    // rank by area, blended with share-of-length-on-new-ground: between two
+    // routes that defog the same area, the one that isn't mostly a re-walk wins
+    const key = (c) => c.gain.area * (0.7 + 0.3 * Math.min(1, c.gain.newPct / 100));
+    scored.sort((x, y) => key(y) - key(x));
     const unique = [];
     for (const c of scored) {
       if (unique.some((o) => sameSig(o.s, c.s))) continue;
@@ -381,13 +392,41 @@
     if (!base) { emit({ error: true }); return; }
     const budget = base.lenM * (1 + buffer);
 
-    // Tier 2: fetch street data around the via candidates so ranking can chase
-    // undefogged streets. On any failure, carry on with fog-only scoring.
+    // Fetch street data so candidates can chase undefogged streets. Short
+    // trips get one rect covering everywhere the budget could reach, which
+    // also feeds the graph planner; longer ones just get discs around the via
+    // candidates. On any failure, carry on with fog-only scoring.
     const rawVias = this._viaCandidates(budget);
-    if (this.streets && rawVias.length) {
+    if (this.streets) {
       emit({ loading: true, phase: "streets" });
-      try { await this.streets.ensureDiscs(rawVias.map((c) => c.latlng), 500, "run"); } catch (e) {}
+      try {
+        if (budget <= 12000) {
+          const mid = L.latLng((A.lat + B.lat) / 2, (A.lng + B.lng) / 2);
+          const half = budget * 0.55 + 400;
+          const { kx, ky } = metresPerDeg(mid.lat);
+          await this.streets.ensureRects(
+            [{ s: mid.lat - half / ky, n: mid.lat + half / ky, w: mid.lng - half / kx, e: mid.lng + half / kx }],
+            streetKind(profile));
+        } else if (rawVias.length) {
+          await this.streets.ensureDiscs(rawVias.map((c) => c.latlng), 500, streetKind(profile));
+        }
+      } catch (e) {}
       if (stale()) return;
+    }
+
+    // The graph planner proposes whole A-to-B walks through rewarding streets;
+    // each costs one BRouter request to become a real route. Skipped in
+    // mostly-virgin areas, where simple detours already defog near the ceiling.
+    let planned = [];
+    if (budget <= 12000) {
+      const planner = this._getPlanner();
+      if (planner) {
+        const mid = L.latLng((A.lat + B.lat) / 2, (A.lng + B.lng) / 2);
+        try {
+          if (planner.meanFracNear(mid, Math.min(1800, budget * 0.25)) < 0.82)
+            planned = planner.planP2P(A, B, budget, 3);
+        } catch (e) {}
+      }
     }
 
     // candidate jobs: BRouter's alternatives + our street/fog-seeking via-points
@@ -399,7 +438,16 @@
         const mid = r.coords[Math.floor(r.coords.length / 2)];
         return { r, adoptWps: [A, L.latLng(mid[1], mid[0]), B] };
       });
-    for (const v of this._pickVias(rawVias))
+    for (const pl of planned)
+      jobs.push(async () => {
+        const r = await this._route(pl.wps, profile, 0);
+        if (!r || !r.lenM || r.lenM > budget * 1.02) return null;
+        const snip = snipOldSpurs(r.coords, this.computeGain, 0);
+        if (snip.coords) return { r: statsFromCoords(snip.coords), adoptWps: [A].concat(resampleMids(snip.coords, 4), [B]) };
+        return { r, adoptWps: pl.wps };
+      });
+    // planner plans free up request budget: fewer geometric vias needed then
+    for (const v of this._pickVias(rawVias).slice(0, planned.length >= 2 ? 3 : MAX_VIAS))
       jobs.push(async () => {
         // real streets inflate the straight-line ellipse bound, so a via route often
         // overshoots the budget, so pull the via toward the line proportionally and retry
@@ -612,7 +660,7 @@
     const bufferPct = Math.round(buffer * 100);
     const inTol = (lenM) => Math.abs(lenM - distM) <= buffer * distM;
 
-    // Tier 2: fetch street data first so bearings and vias chase undefogged
+    // Fetch street data first so bearings and vias chase undefogged
     // streets rather than raw fog. Short loops get one rect around the whole
     // reach (via snapping needs area coverage); long loops fetch discs around
     // the bearing sample points only, to keep the download sane. On any
@@ -639,8 +687,26 @@
       if (stale()) return;
     }
 
-    const bearings = this._loopBearings(S, distM);
-    const total = bearings.length;
+    // Search the street network itself for high-defog loops (thin shapes, odd
+    // topologies: whatever the fog asks for). Each plan then costs one BRouter
+    // request to become a real route. Only for distances whose whole reach was
+    // fetched as one street rect, and only where new ground is scarce enough
+    // that shape matters: in mostly-virgin areas wide simple loops already
+    // defog near the ceiling and planned walks measured worse.
+    let planned = [];
+    if (distM <= 16000) {
+      const planner = this._getPlanner();
+      if (planner) {
+        try {
+          if (planner.meanFracNear(S, Math.min(1800, distM * 0.18)) < 0.82)
+            planned = planner.planLoop(S, distM, buffer, 4);
+        } catch (e) {}
+      }
+    }
+    // With planner candidates in hand, compass-square candidates become a
+    // safety net; keep a couple so an off-target plan can't empty the results.
+    const bearings = this._loopBearings(S, distM).slice(0, planned.length >= 3 ? 2 : MAX_LOOPS);
+    const total = bearings.length + planned.length;
     emit({ loading: true, phase: "loops", done: 0, total });
 
     // 5: roads inflate the straight square (4a) by ~25%, so start with perimeter = D/1.25.
@@ -649,7 +715,17 @@
     const loopWps = (vias) => [S].concat(vias, [S]);
     const fails = { server: 0, tol: 0 };
     const floor = distM * (1 - buffer);
-    const jobs = bearings.map((bearing) => async () => {
+    const plannedJobs = planned.map((pl) => async () => {
+      const raw = await this._route(pl.wps, profile, 0);
+      if (!raw || !raw.lenM) { fails.server++; return null; }
+      const snip = snipOldSpurs(raw.coords, this.computeGain, floor);
+      const c = snip.coords
+        ? { r: statsFromCoords(snip.coords), adoptWps: [S].concat(resampleMids(snip.coords, 6), [S]) }
+        : { r: raw, adoptWps: pl.wps };
+      if (!inTol(c.r.lenM)) { fails.tol++; return null; }
+      return { r: c.r, adoptWps: c.adoptWps, overlap: overlapFrac(c.r.coords) };
+    });
+    const jobs = plannedJobs.concat(bearings.map((bearing) => async () => {
       let mk = (d) => this._loopVias(S, bearing, d);
       // route + snip in one step, so tolerance and the rescale-retry both judge the
       // CLEANED length, so a loop whose snips pull it under target gets regrown, not binned
@@ -686,7 +762,7 @@
       }
       if (!inTol(c.r.lenM)) { fails.tol++; return null; }
       return { r: c.r, adoptWps: c.adoptWps, overlap: overlapFrac(c.r.coords) };
-    });
+    }));
 
     const found = await this._pool(jobs, stale, (done) => emit({ loading: true, phase: "loops", done, total }));
     if (stale()) return;

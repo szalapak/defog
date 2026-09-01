@@ -10,6 +10,7 @@ global.window = global;
 require("./leaflet-stub.js"); // defines global.L before suggest.js needs it
 require(path.join(__dirname, "..", "..", "app", "src", "parser.js"));
 require(path.join(__dirname, "..", "..", "app", "src", "streets.js"));
+require(path.join(__dirname, "..", "..", "app", "src", "planner.js"));
 require(path.join(__dirname, "..", "..", "app", "src", "suggest.js"));
 
 function loadSync(dir) {

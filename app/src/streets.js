@@ -1,4 +1,4 @@
-// Street-aware reward data for route suggestions ("Tier 2").
+// Street-aware reward data for route suggestions.
 // Fetches street geometry for small areas from Overpass (OpenStreetMap) and
 // answers one question: how much AREA could still be defogged by travelling
 // the ways within reach of a point? Each way segment is weighted by the share
@@ -22,9 +22,11 @@
 
   function StreetIndex(opts) {
     this.newFrac = opts.newFrac; // (lon,lat) -> 0..1 share of the corridor stamp still fogged
-    this.segs = new Map();       // "gx,gy" -> [{x,y,lon,lat,lenM,isNew}]
+    this.segs = new Map();       // "gx,gy" -> [{x,y,lon,lat,lenM,frac}]
     this.rects = [];             // fetched coverage, [{s,w,n,e}]
     this.wayIds = new Set();     // dedupe across overlapping fetches
+    this.ways = [];              // raw {id,nodes,geometry}: shared node ids give the
+                                 // route planner its graph connectivity for free
     this.segCount = 0;
     this.kx = null; this.ky = 110540; // metre frame, anchored on first fetch
   }
@@ -40,6 +42,7 @@
   StreetIndex.prototype._addWay = function (w) {
     if (!w.geometry || w.geometry.length < 2 || this.wayIds.has(w.id)) return;
     this.wayIds.add(w.id);
+    if (w.nodes && w.nodes.length === w.geometry.length) this.ways.push({ id: w.id, nodes: w.nodes, geometry: w.geometry });
     for (let i = 1; i < w.geometry.length && this.segCount < MAX_SEGS; i++) {
       const a = w.geometry[i - 1], b = w.geometry[i];
       const ax = a.lon * this.kx, ay = a.lat * this.ky;
