@@ -294,11 +294,10 @@
     return L2;
   };
 
-  // Insert the single best pocket (richest per metre of detour) whose insertion
-  // keeps the plain length within budget. Returns true if one was inserted.
-  GraphPlanner.prototype._growOne = function (anchors, cyclic, budgetPlainM, pockets, used) {
-    if (anchors.length >= MAX_ANCHORS) return false;
-    const cur = this._plainLen(anchors, cyclic);
+  // Insert the single best pocket (richest per metre of detour) whose plain
+  // detour cost fits maxCostM. Returns the inserted node, or null.
+  GraphPlanner.prototype._growOne = function (anchors, cyclic, maxCostM, pockets, used) {
+    if (anchors.length >= MAX_ANCHORS) return null;
     let best = null;
     for (const p of pockets) {
       if (used.has(p) || p.node < 0) continue;
@@ -306,8 +305,7 @@
       for (let g = 0; g < gaps; g++) {
         const u = anchors[g], v = anchors[(g + 1) % anchors.length];
         const cost = this._plain(u)[p.node] + this._plain(p.node)[v] - this._plain(u)[v];
-        if (!isFinite(cost)) continue;
-        if (cur + cost > budgetPlainM) continue;
+        if (!isFinite(cost) || cost > maxCostM) continue;
         const ratio = p.m2 / Math.max(cost, 150);
         if (!best || ratio > best.ratio) best = { p, g, ratio };
       }
@@ -377,12 +375,13 @@
       const anchors = [s, seed.node];
       const stack = []; // pockets in insertion order, so overshoot can undo
       let m = this._materialize(anchors, true);
-      // insert pockets one at a time, re-walking the loop after each, with the
-      // plain-to-walked inflation learned as we go: fixed estimates either
-      // overshot into rejection or stalled below target (both observed)
+      // insert pockets one at a time, re-walking the loop after each; the
+      // detour allowance comes from the WALKED length's real headroom, scaled
+      // by the learned plain-to-walked inflation (a global plain budget
+      // starved growth and plans arrived short, wasting their request)
       for (let it = 0; it < MAX_ANCHORS && m && m.len < target * 0.96; it++) {
         const inflate = Math.min(1.4, Math.max(1.0, m.len / Math.max(1, this._plainLen(anchors, true))));
-        const node = this._growOne(anchors, true, ceilG / inflate, reach, used);
+        const node = this._growOne(anchors, true, (ceilG - m.len) / inflate, reach, used);
         if (!node) break;
         const m2 = this._materialize(anchors, true);
         if (!m2) break;
@@ -397,7 +396,9 @@
         if (!m2) break;
         m = m2;
       }
-      if (!m || m.len < distM * (1 - buffer) * 0.8 || m.len > distM * (1 + buffer) * 1.15) continue;
+      // a plan below this can't survive snapping (measured ~7% shrink) plus
+      // the length tolerance, so don't spend a routing request on it
+      if (!m || m.len < distM * (1 - buffer) * 1.07 || m.len > distM * (1 + buffer) * 1.12) continue;
       // dense waypoints: with ~1 km gaps BRouter shortcuts the plan's detail
       // and the predicted defogging evaporates; ~550 m holds it to the streets
       const nWps = Math.min(20, Math.max(6, Math.round(m.len / 550)));
@@ -443,7 +444,7 @@
       const ceilW = budgetM * 1.03; // snapping usually shortens; slight overhang ok
       for (let it = 0; it < MAX_ANCHORS && m && m.len < budgetM * 0.97; it++) {
         const inflate = Math.min(1.4, Math.max(1.0, m.len / Math.max(1, this._plainLen(anchors, false))));
-        if (!this._growOne(anchors, false, ceilW / inflate, reach, used)) break;
+        if (!this._growOne(anchors, false, (ceilW - m.len) / inflate, reach, used)) break;
         const m2 = this._materialize(anchors, false);
         if (!m2) break;
         m = m2;

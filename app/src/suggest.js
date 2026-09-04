@@ -705,7 +705,8 @@
     }
     // With planner candidates in hand, compass-square candidates become a
     // safety net; keep a couple so an off-target plan can't empty the results.
-    const bearings = this._loopBearings(S, distM).slice(0, planned.length >= 3 ? 2 : MAX_LOOPS);
+    const bearings = this._loopBearings(S, distM)
+      .slice(0, planned.length >= 3 ? 2 : planned.length >= 1 ? 4 : MAX_LOOPS);
     const total = bearings.length + planned.length;
     emit({ loading: true, phase: "loops", done: 0, total });
 
@@ -723,7 +724,7 @@
         ? { r: statsFromCoords(snip.coords), adoptWps: [S].concat(resampleMids(snip.coords, 6), [S]) }
         : { r: raw, adoptWps: pl.wps };
       if (!inTol(c.r.lenM)) { fails.tol++; return null; }
-      return { r: c.r, adoptWps: c.adoptWps, overlap: overlapFrac(c.r.coords) };
+      return { r: c.r, adoptWps: c.adoptWps, overlap: overlapFrac(c.r.coords), planned: true };
     });
     const jobs = plannedJobs.concat(bearings.map((bearing) => async () => {
       let mk = (d) => this._loopVias(S, bearing, d);
@@ -771,9 +772,12 @@
       emit({ empty: true, reason: "server", targetKm: distM / 1000, bufferPct });
       return;
     }
-    // prefer proper loops: drop candidates that retrace >30% of themselves, unless that
-    // would leave nothing to show
-    const clean = found.filter((c) => c.overlap <= 0.3);
+    // Drop square candidates that retrace >30% of themselves: for THEM overlap
+    // is a generation defect (BRouter folding a square into out-and-back
+    // spurs). Planned routes are exempt: when the planner retraces, it decided
+    // the retrace pays (e.g. a bridge is the only way over and back, and a
+    // "lollipop" out to rich streets beats a forced giant detour).
+    const clean = found.filter((c) => c.planned || c.overlap <= 0.3);
     this._finish(runId, clean.length ? clean : found, { targetKm: distM / 1000, bufferPct });
   };
 
