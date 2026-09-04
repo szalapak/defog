@@ -61,12 +61,37 @@
     }
   };
 
+  StreetIndex.prototype._uncovered = function (rects) {
+    return rects.filter((r) =>
+      !this.rects.some((o) => r.s >= o.s && r.n <= o.n && r.w >= o.w && r.e <= o.e));
+  };
+
+  // Would ensureRects/ensureDiscs actually hit the network for these, or is it
+  // all already cached from an earlier run? Lets callers show the "reading the
+  // street map" note only when there's a real fetch, not on every rerun.
+  StreetIndex.prototype.needsFetch = function (rects) { return this._uncovered(rects).length > 0; };
+
+  // Round a point to a ~0.006 degree grid (~450-650 m). Callers build the fetch
+  // area around the rounded centre, so any run whose pin lands in the same grid
+  // cell produces the identical area and reuses the cache: pressing Suggest
+  // again, or after a small pin nudge, doesn't trigger a fresh download. The
+  // fetch area's own margin (hundreds of metres) absorbs the rounding offset.
+  StreetIndex.prototype.snapPoint = function (latlng, g) {
+    g = g || 0.006;
+    return L.latLng(Math.round(latlng.lat / g) * g, Math.round(latlng.lng / g) * g);
+  };
+  StreetIndex.prototype.discRects = function (points, rM) {
+    return points.map((p) => {
+      const kx = 111320 * Math.cos(p.lat * Math.PI / 180);
+      return { s: p.lat - rM / 110540, n: p.lat + rM / 110540, w: p.lng - rM / kx, e: p.lng + rM / kx };
+    });
+  };
+
   // Fetch streets for the given rects (skipping ones already covered), one
   // Overpass query. kind: "run" | "bike". Throws on failure; callers fall back
   // to fog-only scoring, suggestions must keep working without street data.
   StreetIndex.prototype.ensureRects = async function (rects, kind) {
-    const todo = rects.filter((r) =>
-      !this.rects.some((o) => r.s >= o.s && r.n <= o.n && r.w >= o.w && r.e <= o.e));
+    const todo = this._uncovered(rects);
     if (!todo.length) return;
     this._anchor(todo[0].s);
     const hw = kind === "bike" ? BIKE_HW : RUN_HW;
@@ -93,11 +118,7 @@
 
   // Convenience: coverage discs of radius rM around a list of L.latLng points.
   StreetIndex.prototype.ensureDiscs = function (points, rM, kind) {
-    const rects = points.map((p) => {
-      const kx = 111320 * Math.cos(p.lat * Math.PI / 180);
-      return { s: p.lat - rM / 110540, n: p.lat + rM / 110540, w: p.lng - rM / kx, e: p.lng + rM / kx };
-    });
-    return this.ensureRects(rects, kind);
+    return this.ensureRects(this.discRects(points, rM), kind);
   };
 
   // Defoggable area (m²) reachable by travelling the ways within rM of the

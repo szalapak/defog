@@ -428,19 +428,19 @@
     // candidates. On any failure, carry on with fog-only scoring.
     const rawVias = this._viaCandidates(budget);
     if (this.streets) {
-      emit({ loading: true, phase: "streets" });
-      try {
-        if (budget <= 12000) {
-          const mid = L.latLng((A.lat + B.lat) / 2, (A.lng + B.lng) / 2);
-          const half = budget * 0.55 + 400;
-          const { kx, ky } = metresPerDeg(mid.lat);
-          await this.streets.ensureRects(
-            [{ s: mid.lat - half / ky, n: mid.lat + half / ky, w: mid.lng - half / kx, e: mid.lng + half / kx }],
-            streetKind(profile));
-        } else if (rawVias.length) {
-          await this.streets.ensureDiscs(rawVias.map((c) => c.latlng), 500, streetKind(profile));
-        }
-      } catch (e) {}
+      let rects = null;
+      if (budget <= 12000) {
+        const mid = this.streets.snapPoint(L.latLng((A.lat + B.lat) / 2, (A.lng + B.lng) / 2));
+        const half = budget * 0.55 + 400;
+        const { kx, ky } = metresPerDeg(mid.lat);
+        rects = [{ s: mid.lat - half / ky, n: mid.lat + half / ky, w: mid.lng - half / kx, e: mid.lng + half / kx }];
+      } else if (rawVias.length) {
+        rects = this.streets.discRects(rawVias.map((c) => c.latlng), 500);
+      }
+      // only announce a fetch when one will really happen; a rerun in the same
+      // area is served from cache and shouldn't flash "reading the street map"
+      if (rects && this.streets.needsFetch(rects)) emit({ loading: true, phase: "streets" });
+      try { if (rects) await this.streets.ensureRects(rects, streetKind(profile)); } catch (e) {}
       if (stale()) return;
     }
 
@@ -699,23 +699,27 @@
     // failure, carry on with fog-only scoring; suggestions must never die
     // because Overpass is busy.
     if (this.streets) {
-      emit({ loading: true, phase: "streets" });
-      try {
-        const { kx, ky } = metresPerDeg(S.lat);
-        if (distM <= 16000) {
-          const half = distM * 0.45 + 800;
-          await this.streets.ensureRects(
-            [{ s: S.lat - half / ky, n: S.lat + half / ky, w: S.lng - half / kx, e: S.lng + half / kx }],
-            streetKind(profile));
-        } else {
-          const pts = [];
-          for (let b = 0; b < 360; b += 30) for (const f of [0.25, 0.4]) {
-            const th = b * Math.PI / 180;
-            pts.push(L.latLng(S.lat + (Math.cos(th) * distM * f) / ky, S.lng + (Math.sin(th) * distM * f) / kx));
-          }
-          await this.streets.ensureDiscs(pts, bearingRadius(distM) + 200, streetKind(profile));
+      const { kx, ky } = metresPerDeg(S.lat);
+      let rects;
+      if (distM <= 16000) {
+        // build the fetch area around a grid-snapped centre so a rerun (same
+        // or slightly nudged pin) reuses the cache; the planner still uses the
+        // true S, and the area's 800 m margin absorbs the snap offset
+        const c = this.streets.snapPoint(S);
+        const half = distM * 0.45 + 800;
+        rects = [{ s: c.lat - half / ky, n: c.lat + half / ky, w: c.lng - half / kx, e: c.lng + half / kx }];
+      } else {
+        const pts = [];
+        for (let b = 0; b < 360; b += 30) for (const f of [0.25, 0.4]) {
+          const th = b * Math.PI / 180;
+          pts.push(L.latLng(S.lat + (Math.cos(th) * distM * f) / ky, S.lng + (Math.sin(th) * distM * f) / kx));
         }
-      } catch (e) {}
+        rects = this.streets.discRects(pts, bearingRadius(distM) + 200);
+      }
+      // only announce a fetch when one will really happen; a rerun in the same
+      // area is served from cache and shouldn't flash "reading the street map"
+      if (this.streets.needsFetch(rects)) emit({ loading: true, phase: "streets" });
+      try { await this.streets.ensureRects(rects, streetKind(profile)); } catch (e) {}
       if (stale()) return;
     }
 
