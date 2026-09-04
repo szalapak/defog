@@ -65,15 +65,34 @@
   if (style.dilate == null) style.dilate = 1;
   if (style.target === "unexplored") style.target = "streets"; // the old whole-world dim was replaced by Streets left
   style.style = "tint";
+  const STREET_SWATCHES = ["#4fd6e6", "#5b9cff", "#ff9f43", "#ff6f91", "#a3e635"]; // cyan · blue · orange · coral · lime
+  if (!STREET_SWATCHES.includes(style.streetsColor)) style.streetsColor = STREET_SWATCHES[0];
   const streetsMode = () => style.target === "streets";
+  // Streets left has its own basemap memory (dark by default, where the streets glow);
+  // Visited keeps the last light basemap.
+  let streetsBasemap = localStorage.getItem("f2m_streetsBasemap") || "dark";
 
   const persist = () => localStorage.setItem("f2m_style", JSON.stringify(style));
 
   // Street data is shared by the route suggestions and the Streets left look, so
   // whichever fetched an area first serves the other.
   const streets = new StreetIndex({ newFrac: corridorNewFrac });
-  streetsLayer = new StreetsLeftLayer(map, { streets, isNew: cellIsNew });
+  streetsLayer = new StreetsLeftLayer(map, { streets, isNew: cellIsNew, onStats: () => updateStreetsStat() });
   streetsLayer.setLook(BASEMAPS[$("basemap").value].dark ? "dark" : "light");
+
+  // "// 61% streets left": share of the street length inside the frame still to be defogged,
+  // shown in the streets' own colour while Streets left is on.
+  const streetsStat = $("streetsStat"), streetsPct = $("streetsPct");
+  function updateStreetsStat() {
+    let show = streetsMode() && fogMap.tileCount > 0;
+    if (show) {
+      const s = streetsLayer.statsInView(map.getBounds());
+      const total = s.leftM + s.doneM;
+      show = total >= 1;
+      if (show) { streetsPct.textContent = fmtPct(100 * s.leftM / total); streetsPct.style.color = streetsLayer.currentColor(); }
+    }
+    streetsStat.style.display = show ? "" : "none";
+  }
 
   // Visited fog on the dark basemap: a quiet grey at a fraction of the chosen
   // opacity, so it reads as texture under the cyan streets rather than a second
@@ -90,21 +109,25 @@
       fogLayer.setStyle(fs);
       if (!map.hasLayer(fogLayer)) fogLayer.addTo(map);
     }
+    streetsLayer.setColor(style.streetsColor);
     streetsLayer.setEnabled(streetsMode());
+    updateStreetsStat();
   }
   function ensureLayer() {
     if (!fogLayer) fogLayer = createFogLayer(fogMap, { pane: "fog", maxZoom: 19, minZoom: 0, updateWhenIdle: true, style: Object.assign({}, style) });
     applyLayers();
   }
 
-  const alpha = $("alpha"), colorPick = $("colorPick"), swatchBox = $("swatches");
+  const alpha = $("alpha"), colorPick = $("colorPick"), swatchBox = $("swatches"), streetSwatchBox = $("streetSwatches");
   const widenVal = $("widenVal"), widenMinus = $("widenMinus"), widenPlus = $("widenPlus");
-  const shadeSeg = $("shadeSeg"), colourRow = $("colourRow"), darkOption = $("basemapDark");
+  const shadeSeg = $("shadeSeg"), colourRow = $("colourRow"), streetsRow = $("streetsRow"), darkOption = $("basemapDark");
 
   function syncControls() {
     const sm = streetsMode();
     shadeSeg.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x.dataset.target === style.target));
     colourRow.style.display = sm && darkBasemap() ? "none" : ""; // on the dark map the fog colour is fixed
+    streetsRow.style.display = sm ? "" : "none";
+    streetSwatchBox.querySelectorAll(".sw").forEach((s) => s.classList.toggle("active", s.dataset.c === style.streetsColor));
     darkOption.hidden = !sm; // the dark map only makes sense with the streets lit up
     alpha.value = style.alpha;
     colorPick.value = style.color;
@@ -114,11 +137,19 @@
     swatchBox.querySelectorAll(".sw:not(.add)").forEach((s) => s.classList.toggle("active", s.dataset.c === style.color));
   }
   function applyStyle(patch) {
+    const wasStreets = streetsMode();
     Object.assign(style, patch); persist();
-    if (!streetsMode() && darkBasemap()) setBasemap(lastLightBasemap); // leaving Streets left: back to a light map
+    if (streetsMode() && !wasStreets) setBasemap(streetsBasemap);              // entering Streets left: its own (dark) map
+    if (!streetsMode() && darkBasemap()) setBasemap(lastLightBasemap);         // leaving Streets left: back to a light map
     syncControls();
     applyLayers();
   }
+  STREET_SWATCHES.forEach((c) => {
+    const s = document.createElement("span");
+    s.className = "sw"; s.style.background = c; s.dataset.c = c;
+    s.addEventListener("click", () => applyStyle({ streetsColor: c }));
+    streetSwatchBox.appendChild(s);
+  });
   SWATCHES.forEach((c) => {
     const s = document.createElement("span");
     s.className = "sw"; s.style.background = c; s.dataset.c = c;
@@ -136,6 +167,7 @@
   const stepWiden = (d) => applyStyle({ dilate: Math.max(0, Math.min(WIDEN_MAX, style.dilate + d)) });
   widenMinus.addEventListener("click", () => stepWiden(-1));
   widenPlus.addEventListener("click", () => stepWiden(1));
+  if (!streetsMode() && darkBasemap()) setBasemap(lastLightBasemap); // a dark map only belongs to Streets left
   syncControls();
   applyLayers();
 
@@ -163,8 +195,12 @@
     const visited = total > 0 ? fogMap.countVisitedInCellRect(cx0, cy0, cx1, cy1) : 0;
     defogPct.textContent = fmtPct(total > 0 ? 100 * visited / total : 0);
   }
-  map.on("moveend", updateDefog);
-  $("basemap").addEventListener("change", (e) => { setBasemap(e.target.value); syncControls(); applyLayers(); });
+  map.on("moveend", () => { updateDefog(); updateStreetsStat(); });
+  $("basemap").addEventListener("change", (e) => {
+    setBasemap(e.target.value);
+    if (streetsMode()) { streetsBasemap = e.target.value; localStorage.setItem("f2m_streetsBasemap", streetsBasemap); }
+    syncControls(); applyLayers();
+  });
 
   // ---- data loading -----------------------------------------------------------
   const loadStatus = $("loadStatus");
@@ -226,7 +262,6 @@
   const MODE_LABEL = { trekking: "bike route", fastbike: "road bike route", "hiking-mountain": "walk", "car-fast": "car route", rail: "rail route", shortest: "direct line" };
   const IDLE = "Hit Start drawing, then tap the map to drop waypoints. Drag the line to bend it, drag a pin to move it, tap a pin to remove it.";
   let profile = "trekking";
-  const DEFOG_HALF_M = 15; // assumed half-width of the corridor Fog of World clears as you travel
   let units = localStorage.getItem("f2m_units") || "metric";
   let lastStats = null, lastGain = null;
 
@@ -247,7 +282,8 @@
     elevEl.innerHTML = ""; elevHead.style.display = "none";
   }
 
-  const cellMetersAt = (lat) => (40075016.686 / FogParser.WORLD_CELLS) * Math.cos(lat * Math.PI / 180);
+  const DEFOG_HALF_M = 15; // assumed half-width of the corridor Fog of World clears as you travel
+  function cellMetersAt(lat) { return (40075016.686 / FogParser.WORLD_CELLS) * Math.cos(lat * Math.PI / 180); }
 
   // Is this point on genuinely new ground? True only if NO already-visited cell sits within
   // the ~DEFOG_HALF_M corridor, so weaving a cell off a road you've done doesn't read as new.

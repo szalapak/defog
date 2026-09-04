@@ -23,6 +23,8 @@
     #bar .tag { color: var(--muted); font-size: 13px; }
     #defog { margin-left: auto; display: none; gap: .35em; font-size: 13px; color: var(--muted); }
     #defog b { color: var(--ink); }
+    #defog .sep { margin: 0 .2em; }
+    #streetsStat { display: inline-flex; gap: .35em; }
     #hint { margin-left: auto; color: var(--muted); font-size: 13px; }
 
     #main { display: flex; flex: 1; min-height: 0; background: var(--bg); padding: 12px; gap: 12px; }
@@ -62,7 +64,7 @@
     .muted { color: var(--muted); font-size: 12px; }
 
     /* small "?" chip that toggles an inline explanation */
-    .qm { width: 19px; height: 19px; padding: 0; flex: 0 0 auto; border-radius: 50%;
+    .qm { width: 19px; height: 19px; padding: 0; flex: 0 0 19px; border-radius: 50%; line-height: 17px;
       border: 1px solid var(--line2); background: #fff; color: var(--muted);
       font-size: 11px; line-height: 1; }
     .qm:hover { border-color: var(--accent); color: var(--accent); }
@@ -81,6 +83,10 @@
     .seg { display: inline-flex; border: 1px solid var(--line2); border-radius: 9px; overflow: hidden; }
     .seg button { padding: 8px 16px; border: 0; background: #fff; color: var(--ink); }
     .seg button.active { background: var(--accent); color: #fff; }
+
+    /* the Show row sits right at the panel width: never let its "?" wrap onto a second line */
+    #showRow { flex-wrap: nowrap; }
+    #shadeSeg button { padding: 8px 12px; }
 
     /* swatches */
     .swatches { display: flex; gap: 6px; align-items: center; }
@@ -185,7 +191,7 @@
       <span class="brand" id="brandName">DEFOG</span>
       <span class="tag">// go where the fog is</span>
       <span id="hint">load your fog to begin →</span>
-      <span id="defog"><b id="defogPct">0%</b> defogged</span>
+      <span id="defog"><b id="defogPct">0%</b> defogged<span id="streetsStat" style="display:none"><span class="sep">//</span><b id="streetsPct">0%</b> streets left</span></span>
     </div>
 
     <div id="main">
@@ -226,7 +232,7 @@
           <div class="muted" id="loadStatus">Your fog is read on your device and is never uploaded.</div>
 
           <h4>2 · Fog look</h4>
-          <div class="row">Show
+          <div class="row" id="showRow">Show
             <span class="seg" id="shadeSeg">
               <button data-target="explored" class="active">Visited</button>
               <button data-target="streets">Streets left</button>
@@ -236,16 +242,16 @@
           </div>
           <div class="muted help" id="showHelpText" style="display:none">
             <b>Visited</b> shades the ground you've already defogged.
-            <b>Streets left</b> keeps that shading and lights up, in cyan, the streets and paths
-            you haven't done yet, so you can see at a glance where to go. Only the stretches
-            still in fog light up, so a half-done street shows just its missing half. It also
-            unlocks the <b>Dark</b> basemap, where the streets glow.
-            It reads the street map for the area on screen from OpenStreetMap as you pan, so
-            it works zoomed in to about a town at a time. Your fog never leaves your device.
+            <b>Streets left</b> also highlights the streets and paths still to be defogged
+            (only the stretches still in fog light up). It reads the street map for the area
+            on screen as you pan, so it works zoomed in to about a town at a time.
           </div>
-          <div class="row" id="colourRow">Colour
+          <div class="row" id="colourRow">Fog
             <span class="swatches" id="swatches"></span>
             <input type="color" id="colorPick" value="#2d3a4a" />
+          </div>
+          <div class="row" id="streetsRow" style="display:none">Streets
+            <span class="swatches" id="streetSwatches"></span>
           </div>
           <div class="row">Opacity <input type="range" id="alpha" min="30" max="255" value="150" /></div>
           <div>

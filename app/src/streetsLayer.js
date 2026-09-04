@@ -17,14 +17,21 @@
   const MAX_TILES = 12;      // bigger views would download too much: ask to zoom in
   const PIECE_M = 20;        // ways are judged in pieces this long
   const DONE_WITHIN_M = 20;  // a piece is done if a defogged cell lies this close (forgives GPS wobble)
-  const MIN_RUN_M = 25;      // shorter leftover stretches are dropped (confetti at crossings)
+  const MIN_RUN_M = 25;      // shorter leftover stretches aren't drawn (confetti at crossings)
   const SLICE_MS = 12;       // classify in slices this long so big cities don't freeze the page
   const RETRY_MS = 10000;    // after a failed download, wait this long before trying again on a move
   const SECOND_TRY_MS = 3000; // Overpass answers 504 when momentarily busy: one quiet retry first
-  const LOOKS = {
-    light: { core: "#1a8fa8", coreOp: 0.8, halo: "#1a8fa8", haloOp: 0.16 },
-    dark: { core: "#4fd6e6", coreOp: 0.9, halo: "#22bcd1", haloOp: 0.3 }
+  // One swatch colour serves both maps: as-is on the dark map, darkened on the light one.
+  const DEFAULT_COLOR = "#4fd6e6";
+  const OPS = {
+    light: { coreOp: 0.8, haloOp: 0.16, shade: 0.62 },
+    dark: { coreOp: 0.9, haloOp: 0.3, shade: 1 }
   };
+  function shade(hex, f) {
+    const h = hex.replace("#", "");
+    const c = [0, 2, 4].map((i) => Math.round(parseInt(h.substr(i, 2), 16) * f));
+    return "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
+  }
   const coreWeight = (z) => (z <= 13 ? 2 : z <= 15 ? 2.5 : 3);
   const HALO_EXTRA = 4;
 
@@ -41,10 +48,13 @@
     this.map = map;
     this.streets = opts.streets;   // shared StreetIndex
     this.isNew = opts.isNew;       // (lon, lat, radiusM) -> true when no defogged cell is within radius
+    this.onStats = opts.onStats || null; // called whenever what's drawn changes (for the header readout)
     this.enabled = false;
     this.look = "light";
+    this.color = DEFAULT_COLOR;
     this.opacity = 1;
-    this.runs = [];                // [{ll: [[lat, lng], ...], s, w, n, e}] for every classified way
+    this.runs = [];                // stretches still to do: [{ll: [[lat, lng], ...], m, s, w, n, e}]
+    this.doneRuns = [];            // stretches already defogged (kept for the "% of streets left" readout)
     this._cursor = 0;              // how many of streets.ways have been classified
     this._busy = false; this._dirty = false; this._retryAt = 0;
     if (!map.getPane("streets")) {
@@ -76,8 +86,16 @@
 
   // look: "dark" | "light", matching the basemap
   StreetsLeftLayer.prototype.setLook = function (look) {
-    this.look = LOOKS[look] ? look : "light";
+    this.look = OPS[look] ? look : "light";
     this._restyle();
+  };
+  StreetsLeftLayer.prototype.setColor = function (hex) {
+    this.color = /^#[0-9a-f]{6}$/i.test(hex || "") ? hex : DEFAULT_COLOR;
+    this._restyle();
+  };
+  // The colour the streets are drawn in right now (the header readout matches it).
+  StreetsLeftLayer.prototype.currentColor = function () {
+    return shade(this.color, OPS[this.look].shade);
   };
   StreetsLeftLayer.prototype.setOpacity = function (a) {
     this.opacity = Math.max(0, Math.min(1, a));
@@ -86,15 +104,36 @@
 
   // The fog changed (more tiles loaded): every way needs judging again.
   StreetsLeftLayer.prototype.invalidateFog = function () {
-    this.runs = []; this._cursor = 0;
+    this.runs = []; this.doneRuns = []; this._cursor = 0;
     if (this.enabled) this._update();
   };
 
   StreetsLeftLayer.prototype._restyle = function () {
     if (!this.enabled) return;
-    const lk = LOOKS[this.look], w = coreWeight(this.map.getZoom());
-    this.core.setStyle({ color: lk.core, opacity: lk.coreOp * this.opacity, weight: w });
-    this.halo.setStyle({ color: lk.halo, opacity: lk.haloOp * this.opacity, weight: w + HALO_EXTRA });
+    const lk = OPS[this.look], w = coreWeight(this.map.getZoom()), c = this.currentColor();
+    this.core.setStyle({ color: c, opacity: lk.coreOp * this.opacity, weight: w });
+    this.halo.setStyle({ color: c, opacity: lk.haloOp * this.opacity, weight: w + HALO_EXTRA });
+  };
+
+  // Metres of street still to do / already done inside the given bounds, counting
+  // each 20 m piece by its midpoint. Only meaningful for the area already fetched.
+  StreetsLeftLayer.prototype.statsInView = function (b) {
+    const s = b.getSouth(), n = b.getNorth(), w = b.getWest(), e = b.getEast();
+    const ky = 110540, kx = 111320 * Math.cos(((s + n) / 2) * Math.PI / 180);
+    const sum = (list) => {
+      let m = 0;
+      for (const r of list) {
+        if (r.n < s || r.s > n || r.e < w || r.w > e) continue;
+        const ll = r.ll;
+        for (let i = 1; i < ll.length; i++) {
+          const la = (ll[i - 1][0] + ll[i][0]) / 2, lo = (ll[i - 1][1] + ll[i][1]) / 2;
+          if (la < s || la > n || lo < w || lo > e) continue;
+          m += Math.hypot((ll[i][1] - ll[i - 1][1]) * kx, (ll[i][0] - ll[i - 1][0]) * ky);
+        }
+      }
+      return m;
+    };
+    return { leftM: sum(this.runs), doneM: sum(this.doneRuns) };
   };
 
   StreetsLeftLayer.prototype._say = function (text) {
@@ -165,15 +204,16 @@
     });
   };
 
+  // Split one way into runs of consecutive "left" pieces and consecutive "done" pieces.
   StreetsLeftLayer.prototype._classifyWay = function (w) {
     const g = w.geometry;
     const ky = 110540, kx = 111320 * Math.cos(g[0].lat * Math.PI / 180);
-    let run = null, runM = 0;
+    let run = null, runM = 0, runLeft = false;
     const close = () => {
-      if (run && runM >= MIN_RUN_M) {
+      if (run) {
         let s = 90, n = -90, ww = 180, e = -180;
         for (const p of run) { if (p[0] < s) s = p[0]; if (p[0] > n) n = p[0]; if (p[1] < ww) ww = p[1]; if (p[1] > e) e = p[1]; }
-        this.runs.push({ ll: run, s, n, w: ww, e });
+        (runLeft ? this.runs : this.doneRuns).push({ ll: run, m: runM, s, n, w: ww, e });
       }
       run = null; runM = 0;
     };
@@ -184,9 +224,10 @@
       for (let p = 0; p < pieces; p++) {
         const tm = (p + 0.5) / pieces;
         const left = this.isNew(a.lon + (b.lon - a.lon) * tm, a.lat + (b.lat - a.lat) * tm, DONE_WITHIN_M);
-        if (!left) { close(); continue; }
+        if (run && left !== runLeft) close();
         if (!run) {
           const t0 = p / pieces;
+          runLeft = left;
           run = [[a.lat + (b.lat - a.lat) * t0, a.lon + (b.lon - a.lon) * t0]];
         }
         const t1 = (p + 1) / pieces;
@@ -202,10 +243,11 @@
     const b = this.map.getBounds().pad(0.2);
     const s = b.getSouth(), n = b.getNorth(), w = b.getWest(), e = b.getEast();
     const shown = [];
-    for (const r of this.runs) if (r.n >= s && r.s <= n && r.e >= w && r.w <= e) shown.push(r.ll);
+    for (const r of this.runs) if (r.m >= MIN_RUN_M && r.n >= s && r.s <= n && r.e >= w && r.w <= e) shown.push(r.ll);
     this._restyle();
     this.halo.setLatLngs(shown);
     this.core.setLatLngs(shown);
+    if (this.onStats) this.onStats();
   };
 
   global.StreetsLeftLayer = StreetsLeftLayer;
