@@ -10,7 +10,7 @@
 //
 // Drawing is a glow: a wide translucent halo under a thin bright core, on a
 // canvas pane between the fog and the route overlays. Colours follow the
-// basemap (deep teal on a light map, pale teal glow on the dark one) and never
+// basemap (deep cyan on a light map, pale cyan glow on the dark one) and never
 // borrow the fog swatch colour, which would read as "already defogged".
 (function (global) {
   const TILE_DEG = 0.05;     // download tiles, ~5.5 x 3.5 km at 51°N
@@ -22,8 +22,8 @@
   const RETRY_MS = 10000;    // after a failed download, wait this long before trying again on a move
   const SECOND_TRY_MS = 3000; // Overpass answers 504 when momentarily busy: one quiet retry first
   const LOOKS = {
-    light: { core: "#0e8f7e", coreOp: 0.9, halo: "#0e8f7e", haloOp: 0.18 },
-    dark: { core: "#7fe7d3", coreOp: 0.95, halo: "#3fd1b8", haloOp: 0.35 }
+    light: { core: "#1a8fa8", coreOp: 0.8, halo: "#1a8fa8", haloOp: 0.16 },
+    dark: { core: "#4fd6e6", coreOp: 0.9, halo: "#22bcd1", haloOp: 0.3 }
   };
   const coreWeight = (z) => (z <= 13 ? 2 : z <= 15 ? 2.5 : 3);
   const HALO_EXTRA = 4;

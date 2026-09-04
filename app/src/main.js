@@ -27,10 +27,11 @@
     dark:     { url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", max: 19, attribution: "&copy; OpenStreetMap", dark: true,
                 filter: "invert(1) hue-rotate(180deg) brightness(.82) contrast(.88) saturate(.7)" }
   };
-  let baseLayer = null, streetsLayer = null;
+  let baseLayer = null, streetsLayer = null, lastLightBasemap = "standard";
   function setBasemap(key) {
     if (!BASEMAPS[key]) key = "standard";
     const b = BASEMAPS[key];
+    if (!b.dark) lastLightBasemap = key;
     if (baseLayer) map.removeLayer(baseLayer);
     baseLayer = L.tileLayer(b.url, { maxZoom: 19, maxNativeZoom: b.max, minZoom: 0, subdomains: b.sub || "abc", attribution: b.attribution });
     baseLayer.addTo(map);
@@ -60,9 +61,8 @@
 
   const saved = JSON.parse(localStorage.getItem("f2m_style") || "null");
   // target: "explored" shades the ground you've defogged; "streets" lights up the streets left
-  let style = saved || { target: "explored", color: "#2d3a4a", alpha: 150, dilate: 1, streetsAlpha: 255 };
+  let style = saved || { target: "explored", color: "#2d3a4a", alpha: 150, dilate: 1 };
   if (style.dilate == null) style.dilate = 1;
-  if (style.streetsAlpha == null) style.streetsAlpha = 255;
   if (style.target === "unexplored") style.target = "streets"; // the old whole-world dim was replaced by Streets left
   style.style = "tint";
   const streetsMode = () => style.target === "streets";
@@ -75,14 +75,21 @@
   streetsLayer = new StreetsLeftLayer(map, { streets, isNew: cellIsNew });
   streetsLayer.setLook(BASEMAPS[$("basemap").value].dark ? "dark" : "light");
 
-  // Put the right layers on the map for the chosen look: Visited shows the fog
-  // layer alone, Streets left swaps it for the highlighted streets.
+  // Visited fog on the dark basemap: a quiet grey at a fraction of the chosen
+  // opacity, so it reads as texture under the cyan streets rather than a second
+  // bright network. Drag Opacity to the bottom and it all but disappears.
+  const DARK_FOG = { color: "#dfe4ee", alphaScale: 0.35 };
+  const darkBasemap = () => !!BASEMAPS[$("basemap").value].dark;
+
+  // Put the right layers on the map for the chosen look: the visited fog is
+  // always there; Streets left adds the highlighted streets on top.
   function applyLayers() {
     if (fogLayer) {
-      if (streetsMode()) { if (map.hasLayer(fogLayer)) map.removeLayer(fogLayer); }
-      else { fogLayer.setStyle(style); if (!map.hasLayer(fogLayer)) fogLayer.addTo(map); }
+      const fs = Object.assign({}, style, { target: "explored" });
+      if (streetsMode() && darkBasemap()) { fs.color = DARK_FOG.color; fs.alpha = Math.round(style.alpha * DARK_FOG.alphaScale); }
+      fogLayer.setStyle(fs);
+      if (!map.hasLayer(fogLayer)) fogLayer.addTo(map);
     }
-    streetsLayer.setOpacity(style.streetsAlpha / 255);
     streetsLayer.setEnabled(streetsMode());
   }
   function ensureLayer() {
@@ -92,14 +99,14 @@
 
   const alpha = $("alpha"), colorPick = $("colorPick"), swatchBox = $("swatches");
   const widenVal = $("widenVal"), widenMinus = $("widenMinus"), widenPlus = $("widenPlus");
-  const shadeSeg = $("shadeSeg"), colourRow = $("colourRow"), widenBlock = $("widenBlock");
+  const shadeSeg = $("shadeSeg"), colourRow = $("colourRow"), darkOption = $("basemapDark");
 
   function syncControls() {
     const sm = streetsMode();
     shadeSeg.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x.dataset.target === style.target));
-    colourRow.style.display = sm ? "none" : "";   // street colour is fixed (never the fog colour)
-    widenBlock.style.display = sm ? "none" : "";  // widen only applies to the fog
-    alpha.value = sm ? style.streetsAlpha : style.alpha;
+    colourRow.style.display = sm && darkBasemap() ? "none" : ""; // on the dark map the fog colour is fixed
+    darkOption.hidden = !sm; // the dark map only makes sense with the streets lit up
+    alpha.value = style.alpha;
     colorPick.value = style.color;
     widenVal.textContent = style.dilate;
     widenMinus.disabled = style.dilate <= 0;
@@ -107,7 +114,9 @@
     swatchBox.querySelectorAll(".sw:not(.add)").forEach((s) => s.classList.toggle("active", s.dataset.c === style.color));
   }
   function applyStyle(patch) {
-    Object.assign(style, patch); persist(); syncControls();
+    Object.assign(style, patch); persist();
+    if (!streetsMode() && darkBasemap()) setBasemap(lastLightBasemap); // leaving Streets left: back to a light map
+    syncControls();
     applyLayers();
   }
   SWATCHES.forEach((c) => {
@@ -122,8 +131,7 @@
   swatchBox.appendChild(addSw);
 
   shadeSeg.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => applyStyle({ target: b.dataset.target })));
-  alpha.addEventListener("input", () => applyStyle(streetsMode()
-    ? { streetsAlpha: parseInt(alpha.value, 10) } : { alpha: parseInt(alpha.value, 10) }));
+  alpha.addEventListener("input", () => applyStyle({ alpha: parseInt(alpha.value, 10) }));
   colorPick.addEventListener("input", () => applyStyle({ color: colorPick.value }));
   const stepWiden = (d) => applyStyle({ dilate: Math.max(0, Math.min(WIDEN_MAX, style.dilate + d)) });
   widenMinus.addEventListener("click", () => stepWiden(-1));
@@ -156,7 +164,7 @@
     defogPct.textContent = fmtPct(total > 0 ? 100 * visited / total : 0);
   }
   map.on("moveend", updateDefog);
-  $("basemap").addEventListener("change", (e) => setBasemap(e.target.value));
+  $("basemap").addEventListener("change", (e) => { setBasemap(e.target.value); syncControls(); applyLayers(); });
 
   // ---- data loading -----------------------------------------------------------
   const loadStatus = $("loadStatus");

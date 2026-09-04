@@ -14,10 +14,10 @@ uploaded anywhere.
 - Renders the fog as a canvas overlay on a real basemap (OSM / CyclOSM / a dark
   variant of OSM), decoding only the tiles in view so large datasets stay responsive.
 - **Fog look:** shade the ground you've visited (colour, opacity, and **Widen** to fatten
-  thin tracks), or switch to **Streets left**, which lights up the streets and paths you
-  haven't defogged yet, heatmap-style. Only the stretches still in fog light up, so a
-  half-done street shows just its missing half. Works zoomed in to about a town at a time;
-  pair it with the dark basemap for the full glow.
+  thin tracks), or switch to **Streets left**, which keeps that shading and lights up, in
+  cyan, the streets and paths you haven't defogged yet, heatmap-style. Only the stretches
+  still in fog light up, so a half-done street shows just its missing half. Works zoomed in
+  to about a town at a time, and unlocks a dark basemap where the streets glow.
 - **Live "% defogged"** of the current view in the header.
 - **Route planning** snapped to real roads via [BRouter](https://brouter.de) (bike / road /
   walk / car / rail): draggable & line-insertable waypoints, a **Reverse** button that

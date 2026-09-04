@@ -236,9 +236,10 @@
           </div>
           <div class="muted help" id="showHelpText" style="display:none">
             <b>Visited</b> shades the ground you've already defogged.
-            <b>Streets left</b> lights up the streets and paths you haven't done yet, so you
-            can see at a glance where to go. Only the stretches still in fog light up, so a
-            half-done street shows just its missing half. Try the <b>Dark</b> basemap for the full glow.
+            <b>Streets left</b> keeps that shading and lights up, in cyan, the streets and paths
+            you haven't done yet, so you can see at a glance where to go. Only the stretches
+            still in fog light up, so a half-done street shows just its missing half. It also
+            unlocks the <b>Dark</b> basemap, where the streets glow.
             It reads the street map for the area on screen from OpenStreetMap as you pan, so
             it works zoomed in to about a town at a time. Your fog never leaves your device.
           </div>
@@ -247,7 +248,7 @@
             <input type="color" id="colorPick" value="#2d3a4a" />
           </div>
           <div class="row">Opacity <input type="range" id="alpha" min="30" max="255" value="150" /></div>
-          <div id="widenBlock">
+          <div>
             <div class="row">Widen
               <span class="stepper">
                 <button id="widenMinus" class="step" title="Narrower">−</button>
@@ -267,7 +268,7 @@
             <select id="basemap" class="grow">
               <option value="standard">Standard (OSM)</option>
               <option value="cycle">Cycle (CyclOSM)</option>
-              <option value="dark">Dark</option>
+              <option value="dark" id="basemapDark" hidden>Dark</option>
             </select>
           </div>
         </div>
