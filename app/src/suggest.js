@@ -439,7 +439,7 @@
       }
       // only announce a fetch when one will really happen; a rerun in the same
       // area is served from cache and shouldn't flash "reading the street map"
-      if (rects && this.streets.needsFetch(rects)) emit({ loading: true, phase: "streets" });
+      if (rects && this.streets.needsFetch(rects, streetKind(profile))) emit({ loading: true, phase: "streets" });
       try { if (rects) await this.streets.ensureRects(rects, streetKind(profile)); } catch (e) {}
       if (stale()) return;
     }
@@ -718,7 +718,7 @@
       }
       // only announce a fetch when one will really happen; a rerun in the same
       // area is served from cache and shouldn't flash "reading the street map"
-      if (this.streets.needsFetch(rects)) emit({ loading: true, phase: "streets" });
+      if (this.streets.needsFetch(rects, streetKind(profile))) emit({ loading: true, phase: "streets" });
       try { await this.streets.ensureRects(rects, streetKind(profile)); } catch (e) {}
       if (stale()) return;
     }

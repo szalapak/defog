@@ -61,15 +61,19 @@
     }
   };
 
-  StreetIndex.prototype._uncovered = function (rects) {
+  // A rect counts as covered when an earlier fetch contains it AND fetched at
+  // least the streets asked for now: the walking set is a superset of the bike
+  // set, so a "run" fetch satisfies a later "bike" request but not vice versa.
+  StreetIndex.prototype._uncovered = function (rects, kind) {
     return rects.filter((r) =>
-      !this.rects.some((o) => r.s >= o.s && r.n <= o.n && r.w >= o.w && r.e <= o.e));
+      !this.rects.some((o) => r.s >= o.s && r.n <= o.n && r.w >= o.w && r.e <= o.e &&
+        (o.kind === "run" || o.kind === kind)));
   };
 
   // Would ensureRects/ensureDiscs actually hit the network for these, or is it
   // all already cached from an earlier run? Lets callers show the "reading the
   // street map" note only when there's a real fetch, not on every rerun.
-  StreetIndex.prototype.needsFetch = function (rects) { return this._uncovered(rects).length > 0; };
+  StreetIndex.prototype.needsFetch = function (rects, kind) { return this._uncovered(rects, kind).length > 0; };
 
   // Round a point to a ~0.006 degree grid (~450-650 m). Callers build the fetch
   // area around the rounded centre, so any run whose pin lands in the same grid
@@ -91,7 +95,7 @@
   // Overpass query. kind: "run" | "bike". Throws on failure; callers fall back
   // to fog-only scoring, suggestions must keep working without street data.
   StreetIndex.prototype.ensureRects = async function (rects, kind) {
-    const todo = this._uncovered(rects);
+    const todo = this._uncovered(rects, kind);
     if (!todo.length) return;
     this._anchor(todo[0].s);
     const hw = kind === "bike" ? BIKE_HW : RUN_HW;
@@ -113,7 +117,7 @@
     if (!res.ok) throw new Error("overpass HTTP " + res.status);
     const gj = await res.json();
     for (const el of gj.elements || []) if (el.type === "way") this._addWay(el);
-    this.rects.push(...todo);
+    for (const r of todo) this.rects.push({ s: r.s, w: r.w, n: r.n, e: r.e, kind });
   };
 
   // Convenience: coverage discs of radius rM around a list of L.latLng points.

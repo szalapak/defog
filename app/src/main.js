@@ -12,6 +12,7 @@
     });
   }
   wireHelp("widenHelp", "widenHelpText");
+  wireHelp("showHelp", "showHelpText");
 
   const map = L.map("map", { center: [50, 15], zoom: 4, worldCopyJump: false });
   map.createPane("fog");
@@ -20,17 +21,26 @@
   const BASEMAPS = {
     standard: { url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", max: 19, attribution: "&copy; OpenStreetMap" },
     cycle:    { url: "https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png", max: 20, sub: "abc", attribution: "&copy; CyclOSM &copy; OpenStreetMap" },
-    voyager:  { url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", max: 20, sub: "abcd", attribution: "&copy; OpenStreetMap &copy; CARTO" }
+    // Dark: the standard OSM tiles inverted with the hues put back, so water stays blue and
+    // parks green. Keyless and no extra provider (CARTO's Voyager and dark tiles now need an
+    // API key, so Voyager was dropped).
+    dark:     { url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", max: 19, attribution: "&copy; OpenStreetMap", dark: true,
+                filter: "invert(1) hue-rotate(180deg) brightness(.82) contrast(.88) saturate(.7)" }
   };
-  let baseLayer = null;
+  let baseLayer = null, streetsLayer = null;
   function setBasemap(key) {
-    const b = BASEMAPS[key] || BASEMAPS.standard;
+    if (!BASEMAPS[key]) key = "standard";
+    const b = BASEMAPS[key];
     if (baseLayer) map.removeLayer(baseLayer);
     baseLayer = L.tileLayer(b.url, { maxZoom: 19, maxNativeZoom: b.max, minZoom: 0, subdomains: b.sub || "abc", attribution: b.attribution });
     baseLayer.addTo(map);
     baseLayer.bringToBack();
+    baseLayer.getContainer().style.filter = b.filter || "";
+    $("basemap").value = key;
+    localStorage.setItem("f2m_basemap", key);
+    if (streetsLayer) streetsLayer.setLook(b.dark ? "dark" : "light"); // street glow colours follow the basemap
   }
-  setBasemap("standard");
+  setBasemap(localStorage.getItem("f2m_basemap") || "standard");
 
   // ---- tabs -------------------------------------------------------------------
   const sidebar = document.getElementById("sidebar");
@@ -49,25 +59,47 @@
   const WIDEN_MAX = 4;
 
   const saved = JSON.parse(localStorage.getItem("f2m_style") || "null");
-  let style = saved || { target: "explored", color: "#2d3a4a", alpha: 150, dilate: 1 };
+  // target: "explored" shades the ground you've defogged; "streets" lights up the streets left
+  let style = saved || { target: "explored", color: "#2d3a4a", alpha: 150, dilate: 1, streetsAlpha: 255 };
   if (style.dilate == null) style.dilate = 1;
+  if (style.streetsAlpha == null) style.streetsAlpha = 255;
+  if (style.target === "unexplored") style.target = "streets"; // the old whole-world dim was replaced by Streets left
   style.style = "tint";
+  const streetsMode = () => style.target === "streets";
 
   const persist = () => localStorage.setItem("f2m_style", JSON.stringify(style));
+
+  // Street data is shared by the route suggestions and the Streets left look, so
+  // whichever fetched an area first serves the other.
+  const streets = new StreetIndex({ newFrac: corridorNewFrac });
+  streetsLayer = new StreetsLeftLayer(map, { streets, isNew: cellIsNew });
+  streetsLayer.setLook(BASEMAPS[$("basemap").value].dark ? "dark" : "light");
+
+  // Put the right layers on the map for the chosen look: Visited shows the fog
+  // layer alone, Streets left swaps it for the highlighted streets.
+  function applyLayers() {
+    if (fogLayer) {
+      if (streetsMode()) { if (map.hasLayer(fogLayer)) map.removeLayer(fogLayer); }
+      else { fogLayer.setStyle(style); if (!map.hasLayer(fogLayer)) fogLayer.addTo(map); }
+    }
+    streetsLayer.setOpacity(style.streetsAlpha / 255);
+    streetsLayer.setEnabled(streetsMode());
+  }
   function ensureLayer() {
-    if (!fogLayer) {
-      fogLayer = createFogLayer(fogMap, { pane: "fog", maxZoom: 19, minZoom: 0, updateWhenIdle: true, style: Object.assign({}, style) });
-      fogLayer.addTo(map);
-    } else fogLayer.setStyle(style);
+    if (!fogLayer) fogLayer = createFogLayer(fogMap, { pane: "fog", maxZoom: 19, minZoom: 0, updateWhenIdle: true, style: Object.assign({}, style) });
+    applyLayers();
   }
 
   const alpha = $("alpha"), colorPick = $("colorPick"), swatchBox = $("swatches");
   const widenVal = $("widenVal"), widenMinus = $("widenMinus"), widenPlus = $("widenPlus");
-  const shadeSeg = $("shadeSeg");
+  const shadeSeg = $("shadeSeg"), colourRow = $("colourRow"), widenBlock = $("widenBlock");
 
   function syncControls() {
+    const sm = streetsMode();
     shadeSeg.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x.dataset.target === style.target));
-    alpha.value = style.alpha;
+    colourRow.style.display = sm ? "none" : "";   // street colour is fixed (never the fog colour)
+    widenBlock.style.display = sm ? "none" : "";  // widen only applies to the fog
+    alpha.value = sm ? style.streetsAlpha : style.alpha;
     colorPick.value = style.color;
     widenVal.textContent = style.dilate;
     widenMinus.disabled = style.dilate <= 0;
@@ -76,7 +108,7 @@
   }
   function applyStyle(patch) {
     Object.assign(style, patch); persist(); syncControls();
-    if (fogLayer) fogLayer.setStyle(style);
+    applyLayers();
   }
   SWATCHES.forEach((c) => {
     const s = document.createElement("span");
@@ -90,12 +122,14 @@
   swatchBox.appendChild(addSw);
 
   shadeSeg.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => applyStyle({ target: b.dataset.target })));
-  alpha.addEventListener("input", () => applyStyle({ alpha: parseInt(alpha.value, 10) }));
+  alpha.addEventListener("input", () => applyStyle(streetsMode()
+    ? { streetsAlpha: parseInt(alpha.value, 10) } : { alpha: parseInt(alpha.value, 10) }));
   colorPick.addEventListener("input", () => applyStyle({ color: colorPick.value }));
   const stepWiden = (d) => applyStyle({ dilate: Math.max(0, Math.min(WIDEN_MAX, style.dilate + d)) });
   widenMinus.addEventListener("click", () => stepWiden(-1));
   widenPlus.addEventListener("click", () => stepWiden(1));
   syncControls();
+  applyLayers();
 
   // ---- "% defogged" of the current view ---------------------------------------
   const hintEl = $("hint"), defogEl = $("defog"), defogPct = $("defogPct");
@@ -134,6 +168,7 @@
     if (b) map.fitBounds(b, { padding: [20, 20] });
     setLoad(`${fogMap.tileCount} tiles loaded ✓`);
     updateDefog();
+    streetsLayer.invalidateFog(); // streets must be judged against the fog that just arrived
     syncSug(); // fog just arrived, so the Suggest button can wake up
   }
   async function loadFromInput(fileList) {
@@ -208,8 +243,9 @@
 
   // Is this point on genuinely new ground? True only if NO already-visited cell sits within
   // the ~DEFOG_HALF_M corridor, so weaving a cell off a road you've done doesn't read as new.
-  function cellIsNew(lon, lat) {
-    const r = Math.max(1, Math.round(DEFOG_HALF_M / cellMetersAt(lat)));
+  // (The Streets left look passes a slightly wider radius to forgive GPS wobble.)
+  function cellIsNew(lon, lat, withinM) {
+    const r = Math.max(1, Math.round((withinM || DEFOG_HALF_M) / cellMetersAt(lat)));
     const c = FogParser.lngLatToCell(lon, lat);
     const cx0 = Math.floor(c.cx), cy0 = Math.floor(c.cy);
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++)
@@ -348,7 +384,7 @@
     fogMap,
     computeGain,
     isNew: cellIsNew, // previews get the same solid-new / hatched-old split as drawn routes
-    streets: new StreetIndex({ newFrac: corridorNewFrac }), // candidates chase defoggable area on real ways
+    streets, // candidates chase defoggable area on real ways
     onPoints: (n) => {
       sugStatus.textContent = suggest.mode === "loop"
         ? (n === 0 ? "Tap the map to pick the start location of your loop." :

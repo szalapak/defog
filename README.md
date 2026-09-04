@@ -11,9 +11,13 @@ uploaded anywhere.
 ## Features
 
 - Parses the Fog of World `Sync/` format (zlib-compressed tiles → visited cells).
-- Renders the fog as a canvas overlay on a real basemap (OSM / CyclOSM / Voyager),
-  decoding only the tiles in view so large datasets stay responsive.
-- **Fog look:** shade visited/unexplored, colour, opacity, and **Widen** to fatten thin tracks.
+- Renders the fog as a canvas overlay on a real basemap (OSM / CyclOSM / a dark
+  variant of OSM), decoding only the tiles in view so large datasets stay responsive.
+- **Fog look:** shade the ground you've visited (colour, opacity, and **Widen** to fatten
+  thin tracks), or switch to **Streets left**, which lights up the streets and paths you
+  haven't defogged yet, heatmap-style. Only the stretches still in fog light up, so a
+  half-done street shows just its missing half. Works zoomed in to about a town at a time;
+  pair it with the dark basemap for the full glow.
 - **Live "% defogged"** of the current view in the header.
 - **Route planning** snapped to real roads via [BRouter](https://brouter.de) (bike / road /
   walk / car / rail): draggable & line-insertable waypoints, a **Reverse** button that
@@ -35,12 +39,13 @@ for that feature (not your fog data): **route planning and route suggestions** s
 waypoints to the public [BRouter](https://brouter.de) server to snap them to roads; for
 suggestions this includes a handful of automatically generated candidate points near your
 chosen area (their placement is influenced by where your fog is, but the fog itself is
-never sent); route suggestions also fetch the **street map of the area around your pins**
-from the public [Overpass API](https://overpass-api.de) (OpenStreetMap), which only sees
+never sent); route suggestions fetch the **street map of the area around your pins**, and the
+**Streets left** look fetches the street map of the **area on screen**, both from the public
+[Overpass API](https://overpass-api.de) (OpenStreetMap), which only sees
 bounding boxes, the same class of information the basemap tile servers already get, and
 the streets are compared against your fog entirely on your device; and **"Maps ↗"** opens
 your waypoints in Google Maps. As with any web map, basemap tiles are fetched from their providers
-(OpenStreetMap / CARTO / CyclOSM), which reveals the map area you're viewing to them.
+(OpenStreetMap / CyclOSM), which reveals the map area you're viewing to them.
 The site also counts visits with [GoatCounter](https://www.goatcounter.com/), a
 privacy-friendly, cookie-less counter (page views only; no personal data, no tracking
 across sites).
