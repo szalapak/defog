@@ -13,7 +13,8 @@
   const CORRIDOR_M = 30;      // full width Fog of World clears as you travel
   const POCKET_GRID_M = 300;  // pocket = rewarding streets clustered at this scale
   const POCKET_MIN_M2 = 1200; // ignore pockets worth less than ~40 m of virgin street
-  const MAX_POCKETS = 60;
+  const MAX_POCKETS = 120;    // keep NEAR pockets too: a tight cap left growth
+                              // starved (9 of 60 in reach at one field start)
   const MAX_ANCHORS = 9;      // start + up to 8 pockets per loop
   const RICH_PULL = 0.65;     // how strongly connecting paths bend toward reward
   const PARALLEL_M = 22;      // spending an edge also spends parallels this close
@@ -268,7 +269,13 @@
     return best;
   };
 
-  // Rewarding street clusters on a coarse grid: what the plan visits.
+  // Rewarding way clusters on a coarse grid: what the plan visits. A pocket's
+  // worth is its defoggable area WEIGHTED BY PURITY (the still-fogged share of
+  // its ways): a sparse forest cell where every metre walked collects at full
+  // rate must not lose to a big urban cell whose mass is half-cleared fringe.
+  // Raw mass measures how much is there; purity measures how honestly a route
+  // through it collects. (Field case: the Dresdner Heide never seeded a plan
+  // because its path cells lost every raw-mass comparison to city fringe.)
   GraphPlanner.prototype._pockets = function () {
     const cells = new Map();
     this.edges.forEach((e, i) => {
@@ -277,14 +284,19 @@
       const mid = e.coords[Math.floor(e.coords.length / 2)];
       const key = Math.floor(mid[0] * this.kx / POCKET_GRID_M) + "," + Math.floor(mid[1] * this.ky / POCKET_GRID_M);
       let c = cells.get(key);
-      if (!c) cells.set(key, (c = { m2: 0, bestR: -1, node: -1 }));
+      if (!c) cells.set(key, (c = { m2: 0, lenM: 0, bestR: -1, node: -1, px: 0, py: 0 }));
       c.m2 += r;
-      if (r > c.bestR) { c.bestR = r; c.node = e.a; }
+      c.lenM += e.len;
+      if (r > c.bestR) { c.bestR = r; c.node = e.a; c.px = mid[0] * this.kx; c.py = mid[1] * this.ky; }
     });
-    return [...cells.values()]
-      .filter((c) => c.m2 >= POCKET_MIN_M2)
-      .sort((a, b) => b.m2 - a.m2)
-      .slice(0, MAX_POCKETS);
+    const out = [...cells.values()].filter((c) => c.m2 >= POCKET_MIN_M2);
+    // value weights defoggable mass by purity (the still-fogged share of the
+    // pocket's ways), so a sparse-but-virgin forest cell competes with a big
+    // half-cleared city cell instead of always losing on raw mass. This does
+    // NOT cost dense home areas: their top pockets are the same either way
+    // (verified: Neustadt unchanged); it only lets pure outliers seed a plan.
+    for (const c of out) c.value = c.m2 * Math.min(1, c.m2 / (c.lenM * CORRIDOR_M));
+    return out.sort((a, b) => b.value - a.value).slice(0, MAX_POCKETS);
   };
 
   GraphPlanner.prototype._plainLen = function (anchors, cyclic) {
@@ -306,7 +318,7 @@
         const u = anchors[g], v = anchors[(g + 1) % anchors.length];
         const cost = this._plain(u)[p.node] + this._plain(p.node)[v] - this._plain(u)[v];
         if (!isFinite(cost) || cost > maxCostM) continue;
-        const ratio = p.m2 / Math.max(cost, 150);
+        const ratio = p.value / Math.max(cost, 150);
         if (!best || ratio > best.ratio) best = { p, g, ratio };
       }
     }
@@ -353,17 +365,29 @@
     const pockets = this._pockets();
     if (!pockets.length) return [];
     const dS = this._plain(s);
-    const reach = pockets.filter((p) => p.node >= 0 && isFinite(dS[p.node]) && dS[p.node] <= distM * (1 + buffer) * 0.45);
-    // seeds: richest pockets, spread out so the candidates differ
+    const reach = pockets.filter((p) => p.node >= 0 && isFinite(dS[p.node]) && dS[p.node] <= distM * (1 + buffer) * 0.5);
+    // seeds are a UNION of two strategies. First, the richest pockets spread
+    // apart (the original approach): this fields a dense area's strong loops,
+    // which one-per-sector alone dropped (cost Neustadt ~18%). Second, the
+    // best pocket in each 60-degree sector not already covered: this gives
+    // every direction, forest and river included, a trial it would otherwise
+    // lose to the dense half of the compass. The honest ranking of the
+    // finished loops decides between them.
     const seeds = [];
     for (const p of reach) {
       if (seeds.length >= nCands + 2) break;
-      const far = seeds.every((q) => {
-        const dx = (this.lons[q.node] - this.lons[p.node]) * this.kx;
-        const dy = (this.lats[q.node] - this.lats[p.node]) * this.ky;
-        return Math.hypot(dx, dy) > distM * 0.12;
-      });
-      if (far) seeds.push(p);
+      if (seeds.every((q) => Math.hypot(q.px - p.px, q.py - p.py) > distM * 0.12)) seeds.push(p);
+    }
+    const sx = S.lng * this.kx, sy = S.lat * this.ky;
+    const bySector = new Map();
+    for (const p of reach) {
+      const sector = Math.floor((((Math.atan2(p.px - sx, p.py - sy) * 180 / Math.PI) + 360) % 360) / 60);
+      const cur = bySector.get(sector);
+      if (!cur || p.value > cur.value) bySector.set(sector, p);
+    }
+    for (const p of [...bySector.values()].sort((a, b) => b.value - a.value)) {
+      if (seeds.length >= nCands + 4) break;
+      if (!seeds.includes(p)) seeds.push(p);
     }
     const out = [];
     // BRouter snapping straightens a plan ~6-8% shorter than its graph length,
@@ -388,24 +412,58 @@
         stack.push(node);
         m = m2;
       }
-      // drop the most recent pockets while the loop overshoots what snapping
-      // can bring back inside the promise
-      while (m && m.len > ceilG && stack.length) {
+      // repair an overshooting loop into the window snapping can land from
+      // (shrink is ~7% but varies, and the best loops live at the edge: a
+      // tighter 1.07 ceiling binned a star card that snapped 10 m inside
+      // tolerance). Pockets are coarse, so a plain drop usually undershoots;
+      // after each drop, try to re-add a smaller pocket that fits the space.
+      const emitCeil = distM * (1 + buffer) * 1.12;
+      for (let r = 0; r < 4 && m && m.len > emitCeil && stack.length; r++) {
         anchors.splice(anchors.indexOf(stack.pop()), 1);
-        const m2 = this._materialize(anchors, true);
-        if (!m2) break;
+        let m2 = this._materialize(anchors, true);
+        if (!m2) { m = null; break; }
+        if (m2.len < target * 0.96) {
+          const inflate = Math.min(1.4, Math.max(1.0, m2.len / Math.max(1, this._plainLen(anchors, true))));
+          const node = this._growOne(anchors, true, (emitCeil - m2.len) / inflate, reach, used);
+          if (node) {
+            const m3 = this._materialize(anchors, true);
+            if (m3) { stack.push(node); m2 = m3; }
+          }
+        }
         m = m2;
       }
-      // a plan below this can't survive snapping (measured ~7% shrink) plus
-      // the length tolerance, so don't spend a routing request on it
-      if (!m || m.len < distM * (1 - buffer) * 1.07 || m.len > distM * (1 + buffer) * 1.12) continue;
+      // a plan outside this window can't survive snapping plus the length
+      // tolerance, so don't spend a routing request on it
+      if (!m || m.len < distM * (1 - buffer) * 1.07 || m.len > emitCeil) continue;
       // dense waypoints: with ~1 km gaps BRouter shortcuts the plan's detail
       // and the predicted defogging evaporates; ~550 m holds it to the streets
       const nWps = Math.min(20, Math.max(6, Math.round(m.len / 550)));
-      out.push({ wps: [S].concat(resampleWps(m.coords, nWps, this.kx, this.ky), [S]), predM2: m.gained, lenM: m.len });
+      // sector of the loop's farthest reach from S, for direction-diverse emit
+      let fx = 0, fy = 0, fd = -1;
+      for (const c of m.coords) {
+        const dx = c[0] * this.kx - sx, dy = c[1] * this.ky - sy;
+        if (dx * dx + dy * dy > fd) { fd = dx * dx + dy * dy; fx = dx; fy = dy; }
+      }
+      const sector = Math.floor((((Math.atan2(fx, fy) * 180 / Math.PI) + 360) % 360) / 90);
+      out.push({ wps: [S].concat(resampleWps(m.coords, nWps, this.kx, this.ky), [S]), predM2: m.gained, lenM: m.len, sector });
     }
     out.sort((a, b) => b.predM2 - a.predM2);
-    return dedupePlans(out).slice(0, nCands);
+    const deduped = dedupePlans(out);
+    // emit a direction-diverse set by round-robin across 90-degree sectors:
+    // each direction's best plan is taken before any direction's second, so a
+    // single rich direction can't fill every slot and a real alternative (a
+    // forest, a riverside) is put in front of BRouter and the ranking. The
+    // global best is still taken first, so the top card never weakens.
+    const bySec = new Map();
+    for (const p of deduped) { const g = bySec.get(p.sector) || []; g.push(p); bySec.set(p.sector, g); }
+    const groups = [...bySec.values()]; // each already sorted (deduped kept pred order)
+    const diverse = [];
+    for (let round = 0; diverse.length < deduped.length; round++) {
+      const layer = groups.filter((g) => g[round]).map((g) => g[round]);
+      layer.sort((a, b) => b.predM2 - a.predM2);
+      diverse.push(...layer);
+    }
+    return diverse.slice(0, nCands);
   };
 
   // Different seeds can converge onto the same loop once insertion fills in

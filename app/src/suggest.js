@@ -247,6 +247,35 @@
     return out;
   };
 
+  // For loops, don't fill all three cards with the same direction when a
+  // genuinely different one is available: allow at most two loops whose
+  // heading (start pin to the loop's farthest point) lies within 60 degrees of
+  // each other, deferring a third to make room for a different direction, then
+  // top up best-first. Angular distance, so headings either side of due north
+  // (350 and 10 degrees) read as the same direction. A strong third same-way
+  // loop still shows if nothing else was found, so this never invents variety
+  // that isn't there. (A→B has a fixed direction, so this only runs for loops.)
+  SuggestTool.prototype._diversify = function (ranked, extra) {
+    if (extra.targetKm == null || !this.a || ranked.length <= 2) return ranked;
+    const S = this.a.getLatLng();
+    const bearing = (c) => {
+      let far = c.r.coords[0], fd = -1;
+      for (const p of c.r.coords) {
+        const d = (p[1] - S.lat) * (p[1] - S.lat) + (p[0] - S.lng) * (p[0] - S.lng);
+        if (d > fd) { fd = d; far = p; }
+      }
+      return (((Math.atan2(far[0] - S.lng, far[1] - S.lat) * 180 / Math.PI) + 360) % 360);
+    };
+    const apart = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+    const picked = [], rest = [];
+    for (const c of ranked) {
+      const b = bearing(c);
+      if (picked.filter((o) => apart(o._brg, b) <= 60).length < 2) { c._brg = b; picked.push(c); }
+      else rest.push(c);
+    }
+    return picked.concat(rest);
+  };
+
   // Score, dedupe, rank and present the top 3 of a run.
   SuggestTool.prototype._finish = function (runId, cands, extra) {
     if (runId !== this._runId) return;
@@ -270,7 +299,7 @@
       if (unique.some((o) => sameSig(o.s, c.s))) continue;
       unique.push(c);
     }
-    this.results = unique.slice(0, 3);
+    this.results = this._diversify(unique, extra).slice(0, 3);
 
     this.lines = this.results.map((c, i) => {
       const runs = splitRuns(c.r.coords, this.isNew);
@@ -446,8 +475,10 @@
         if (snip.coords) return { r: statsFromCoords(snip.coords), adoptWps: [A].concat(resampleMids(snip.coords, 4), [B]) };
         return { r, adoptWps: pl.wps };
       });
-    // planner plans free up request budget: fewer geometric vias needed then
-    for (const v of this._pickVias(rawVias).slice(0, planned.length >= 2 ? 3 : MAX_VIAS))
+    // planner plans ADD to the via candidates, they don't replace them: the
+    // geometric vias are proven earners and cutting them for weaker plans
+    // dropped p2p's best card. Trim only slightly to bound the request count.
+    for (const v of this._pickVias(rawVias).slice(0, planned.length ? MAX_VIAS - 1 : MAX_VIAS))
       jobs.push(async () => {
         // real streets inflate the straight-line ellipse bound, so a via route often
         // overshoots the budget, so pull the via toward the line proportionally and retry
@@ -704,9 +735,10 @@
       }
     }
     // With planner candidates in hand, compass-square candidates become a
-    // safety net; keep a couple so an off-target plan can't empty the results.
+    // safety net, but a real one: in dense fringe the best square still beats
+    // the best plan at times, so keep three even when plans are plentiful.
     const bearings = this._loopBearings(S, distM)
-      .slice(0, planned.length >= 3 ? 2 : planned.length >= 1 ? 4 : MAX_LOOPS);
+      .slice(0, planned.length >= 3 ? 3 : planned.length >= 1 ? 4 : MAX_LOOPS);
     const total = bearings.length + planned.length;
     emit({ loading: true, phase: "loops", done: 0, total });
 

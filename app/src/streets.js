@@ -71,8 +71,12 @@
     this._anchor(todo[0].s);
     const hw = kind === "bike" ? BIKE_HW : RUN_HW;
     const bb = (r) => [r.s, r.w, r.n, r.e].map((x) => x.toFixed(4)).join(",");
+    // access filter: the graph must not route through ways the router (and
+    // the person!) can't use; a military base on a plan once 400'd the whole
+    // route request because a waypoint landed inside it
+    const acc = `[access!~"^(private|no|military)$"]`;
     const clauses = todo.map((r) =>
-      `way[highway~"^(${hw})$"](${bb(r)});way[highway=service][service!~"^(driveway|parking_aisle)$"](${bb(r)});`).join("");
+      `way[highway~"^(${hw})$"]${acc}(${bb(r)});way[highway=service]${acc}[service!~"^(driveway|parking_aisle)$"](${bb(r)});`).join("");
     const q = `[out:json][timeout:60];(${clauses});out skel geom;`;
     const res = await fetch(OVERPASS, {
       method: "POST",
