@@ -247,14 +247,15 @@
     return out;
   };
 
-  // For loops, don't fill all three cards with the same direction when a
-  // genuinely different one is available: allow at most two loops whose
-  // heading (start pin to the loop's farthest point) lies within 60 degrees of
-  // each other, deferring a third to make room for a different direction, then
-  // top up best-first. Angular distance, so headings either side of due north
-  // (350 and 10 degrees) read as the same direction. A strong third same-way
-  // loop still shows if nothing else was found, so this never invents variety
-  // that isn't there. (A→B has a fixed direction, so this only runs for loops.)
+  // For loops, show the best loop in each of three distinct directions rather
+  // than two variations on the same way: a candidate is taken only if no
+  // already-taken loop heads within 60 degrees of it (heading = start pin to
+  // the loop's farthest point). Angular distance, so headings either side of
+  // due north (350 and 10 degrees) count as the same direction. Whatever the
+  // direction rule defers is appended best-first, so if the geography only
+  // offers one or two directions (water, a dead end) the deck still fills and
+  // this never invents variety that isn't there. (A→B has a fixed direction,
+  // so this only runs for loops.)
   SuggestTool.prototype._diversify = function (ranked, extra) {
     if (extra.targetKm == null || !this.a || ranked.length <= 2) return ranked;
     const S = this.a.getLatLng();
@@ -270,7 +271,7 @@
     const picked = [], rest = [];
     for (const c of ranked) {
       const b = bearing(c);
-      if (picked.filter((o) => apart(o._brg, b) <= 60).length < 2) { c._brg = b; picked.push(c); }
+      if (picked.every((o) => apart(o._brg, b) > 60)) { c._brg = b; picked.push(c); }
       else rest.push(c);
     }
     return picked.concat(rest);
