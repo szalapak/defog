@@ -27,10 +27,10 @@
   // light one so it still reads against pale ground while staying bright.
   const DEFAULT_COLOR = "#4fd6e6";
   const OPS = {
-    light: { coreOp: 0.72, haloOp: 0.14, shade: 0.82 },
+    light: { coreOp: 0.78, haloOp: 0.14, shade: 0.82 },
     dark: { coreOp: 0.9, haloOp: 0.3, shade: 1 }
   };
-  const DIM_OP = 0.3; // strength of stretches the chosen transport can't use
+  const DIM_OP = 0.45; // strength of stretches the chosen transport can't use
   // Which travel class each Plan mode needs; the rest can go anywhere on foot.
   const MODE_CLASS = { trekking: "bike", fastbike: "road", "car-fast": "car" };
   function shade(hex, f) {
@@ -38,7 +38,12 @@
     const c = [0, 2, 4].map((i) => Math.round(parseInt(h.substr(i, 2), 16) * f));
     return "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
   }
-  const coreWeight = (z) => (z <= 13 ? 2 : z <= 15 ? 2.5 : 3);
+  // Zoomed in on a light map the basemap's own streets are wide and colourful, so
+  // the highlight needs more line to hold its own. Zoomed out both maps read fine.
+  const coreWeight = (z, look) => {
+    const w = z <= 13 ? 2 : z <= 15 ? 2.5 : 3;
+    return look === "light" && z >= 14 ? w + 1 : w;
+  };
   const HALO_EXTRA = 4;
 
   const Badge = L.Control.extend({
@@ -126,7 +131,7 @@
 
   StreetsInFogLayer.prototype._restyle = function () {
     if (!this.enabled) return;
-    const lk = OPS[this.look], w = coreWeight(this.map.getZoom()), c = this.currentColor();
+    const lk = OPS[this.look], w = coreWeight(this.map.getZoom(), this.look), c = this.currentColor();
     this.core.setStyle({ color: c, opacity: lk.coreOp * this.opacity, weight: w });
     this.halo.setStyle({ color: c, opacity: lk.haloOp * this.opacity, weight: w + HALO_EXTRA });
     this.dim.setStyle({ color: c, opacity: lk.coreOp * this.opacity * DIM_OP, weight: Math.max(1, w - 0.5) });

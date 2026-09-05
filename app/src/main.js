@@ -69,9 +69,10 @@
   if (!/^#[0-9a-f]{6}$/i.test(style.streetsColor || "")) style.streetsColor = STREET_SWATCHES[0];
   if (style.streetsAlpha == null) style.streetsAlpha = 255;
   const streetsMode = () => style.target === "streets";
-  // Streets in fog has its own basemap memory (dark by default, where the streets glow);
-  // Visited keeps the last light basemap.
-  let streetsBasemap = localStorage.getItem("f2m_streetsBasemap") || "dark";
+  // Streets in fog always opens on the dark map, where the streets glow. Pick
+  // another basemap and it holds until you leave the mode; coming back is dark
+  // again. Visited returns to the last light basemap.
+  const STREETS_BASEMAP = "dark";
 
   const persist = () => localStorage.setItem("f2m_style", JSON.stringify(style));
 
@@ -146,7 +147,7 @@
   function applyStyle(patch) {
     const wasStreets = streetsMode();
     Object.assign(style, patch); persist();
-    if (streetsMode() && !wasStreets) setBasemap(streetsBasemap);              // entering Streets in fog: its own (dark) map
+    if (streetsMode() && !wasStreets) setBasemap(STREETS_BASEMAP);             // entering Streets in fog: the dark map
     if (!streetsMode() && darkBasemap()) setBasemap(lastLightBasemap);         // leaving Streets in fog: back to a light map
     syncControls();
     applyLayers();
@@ -180,7 +181,8 @@
   const stepWiden = (d) => applyStyle({ dilate: Math.max(0, Math.min(WIDEN_MAX, style.dilate + d)) });
   widenMinus.addEventListener("click", () => stepWiden(-1));
   widenPlus.addEventListener("click", () => stepWiden(1));
-  if (!streetsMode() && darkBasemap()) setBasemap(lastLightBasemap); // a dark map only belongs to Streets in fog
+  // start on the basemap this mode wants, whatever the last visit left behind
+  setBasemap(streetsMode() ? STREETS_BASEMAP : lastLightBasemap);
   syncControls();
   applyLayers();
 
@@ -211,7 +213,6 @@
   map.on("moveend", () => { updateDefog(); updateStreetsStat(); });
   $("basemap").addEventListener("change", (e) => {
     setBasemap(e.target.value);
-    if (streetsMode()) { streetsBasemap = e.target.value; localStorage.setItem("f2m_streetsBasemap", streetsBasemap); }
     syncControls(); applyLayers();
   });
 
