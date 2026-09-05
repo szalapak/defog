@@ -23,6 +23,8 @@
     #bar .tag { color: var(--muted); font-size: 13px; }
     #defog { margin-left: auto; display: none; gap: .35em; font-size: 13px; color: var(--muted); }
     #defog b { color: var(--ink); }
+    #defog .sep { margin: 0 .2em; }
+    #streetsStat { display: inline-flex; gap: .35em; }
     #hint { margin-left: auto; color: var(--muted); font-size: 13px; }
 
     #main { display: flex; flex: 1; min-height: 0; background: var(--bg); padding: 12px; gap: 12px; }
@@ -62,7 +64,7 @@
     .muted { color: var(--muted); font-size: 12px; }
 
     /* small "?" chip that toggles an inline explanation */
-    .qm { width: 19px; height: 19px; padding: 0; flex: 0 0 auto; border-radius: 50%;
+    .qm { width: 19px; height: 19px; padding: 0; flex: 0 0 19px; border-radius: 50%; line-height: 17px;
       border: 1px solid var(--line2); background: #fff; color: var(--muted);
       font-size: 11px; line-height: 1; }
     .qm:hover { border-color: var(--accent); color: var(--accent); }
@@ -82,12 +84,16 @@
     .seg button { padding: 8px 16px; border: 0; background: #fff; color: var(--ink); }
     .seg button.active { background: var(--accent); color: #fff; }
 
+    /* the Show row sits right at the panel width: never let its "?" wrap onto a second line */
+    #showRow { flex-wrap: nowrap; }
+    #shadeSeg button { padding: 8px 12px; }
+
     /* swatches */
     .swatches { display: flex; gap: 6px; align-items: center; }
     .sw { width: 24px; height: 24px; border-radius: 6px; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line2); cursor: pointer; }
     .sw.active { box-shadow: 0 0 0 2px var(--accent); }
     .sw.add { display: flex; align-items: center; justify-content: center; background: #fff; color: var(--muted); font-size: 15px; }
-    #colorPick { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
+    #colorPick, #streetColorPick { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
     input[type=range] { flex: 1; accent-color: var(--accent); }
     .stepper { display: inline-flex; align-items: center; gap: 8px; }
     .stepper .step { width: 30px; height: 30px; padding: 0; font-size: 18px; line-height: 1;
@@ -136,6 +142,10 @@
     @media (pointer: coarse) { .wp { font-size: 13px; } }
 
     .leaflet-bar { border-radius: 9px !important; overflow: hidden; border: 1px solid var(--line2) !important; }
+    /* small on-map note for the Streets in fog look ("zoom in", "reading the street map") */
+    .streetsBadge { background: var(--card); color: var(--ink); font-family: var(--mono); font-size: 12px;
+      padding: 6px 10px; border-radius: 9px; border: 1px solid var(--line2); box-shadow: 0 1px 4px #0000000f;
+      max-width: 240px; line-height: 1.4; }
     .leaflet-bar a { font-family: var(--mono); }
 
     /* grab-handle for the mobile bottom sheet (hidden on desktop) */
@@ -181,7 +191,7 @@
       <span class="brand" id="brandName">DEFOG</span>
       <span class="tag">// go where the fog is</span>
       <span id="hint">load your fog to begin →</span>
-      <span id="defog"><b id="defogPct">0%</b> defogged</span>
+      <span id="defog"><b id="defogPct">0%</b> defogged<span id="streetsStat" style="display:none"><span class="sep">//</span><b id="streetsPct">0%</b> streets in fog</span></span>
     </div>
 
     <div id="main">
@@ -222,36 +232,55 @@
           <div class="muted" id="loadStatus">Your fog is read on your device and is never uploaded.</div>
 
           <h4>2 · Fog look</h4>
-          <div class="row">Shade
+          <div class="row" id="showRow">Show
             <span class="seg" id="shadeSeg">
               <button data-target="explored" class="active">Visited</button>
-              <button data-target="unexplored">Unexplored</button>
+              <button data-target="streets">Streets in fog</button>
             </span>
+            <button id="showHelp" class="qm" type="button" aria-expanded="false"
+                    aria-controls="showHelpText" title="What do these show?">?</button>
           </div>
-          <div class="row">Colour
+          <div class="muted help" id="showHelpText" style="display:none">
+            <b>Visited</b> shades the ground you've already defogged.
+            <b>Streets in fog</b> highlights the streets and paths still covered by fog, so
+            you can spot your best defogging opportunities. In <b>Plan</b> mode, paths that
+            you can't take (e.g. pedestrian paths while planning car routes) are faded.
+            Defog reads the street map for the area on screen as you pan, so it works when
+            you're zoomed in (about an area of a town).
+          </div>
+          <div class="row" id="colourRow">Fog
             <span class="swatches" id="swatches"></span>
             <input type="color" id="colorPick" value="#2d3a4a" />
           </div>
-          <div class="row">Opacity <input type="range" id="alpha" min="30" max="255" value="150" /></div>
-          <div class="row">Widen
-            <span class="stepper">
-              <button id="widenMinus" class="step" title="Narrower">−</button>
-              <span id="widenVal">1</span>
-              <button id="widenPlus" class="step" title="Wider">+</button>
-            </span>
-            <button id="widenHelp" class="qm" type="button" aria-expanded="false"
-                    aria-controls="widenHelpText" title="What is Widen?">?</button>
+          <div class="row"><span id="alphaLabel">Opacity</span> <input type="range" id="alpha" min="30" max="255" value="150" /></div>
+          <div class="row" id="streetsRow" style="display:none">Streets
+            <span class="swatches" id="streetSwatches"></span>
+            <input type="color" id="streetColorPick" value="#4fd6e6" />
           </div>
-          <div class="muted help" id="widenHelpText" style="display:none">
-            Fattens the drawn tracks so thin ones stay visible when you zoom out.
-            It only changes how the fog looks here, never your Fog of World data
-            or the routes you get. Turn it down to 0 to see your fog exactly as recorded.
+          <div class="row" id="streetsAlphaRow" style="display:none">Street opacity
+            <input type="range" id="streetsAlpha" min="30" max="255" value="255" />
+          </div>
+          <div>
+            <div class="row">Widen
+              <span class="stepper">
+                <button id="widenMinus" class="step" title="Narrower">−</button>
+                <span id="widenVal">1</span>
+                <button id="widenPlus" class="step" title="Wider">+</button>
+              </span>
+              <button id="widenHelp" class="qm" type="button" aria-expanded="false"
+                      aria-controls="widenHelpText" title="What is Widen?">?</button>
+            </div>
+            <div class="muted help" id="widenHelpText" style="display:none">
+              Fattens the drawn tracks so thin ones stay visible when you zoom out.
+              It only changes how the fog looks here, never your Fog of World data
+              or the routes you get. Turn it down to 0 to see your fog exactly as recorded.
+            </div>
           </div>
           <div class="row">Basemap
             <select id="basemap" class="grow">
               <option value="standard">Standard (OSM)</option>
               <option value="cycle">Cycle (CyclOSM)</option>
-              <option value="voyager">Voyager</option>
+              <option value="dark" id="basemapDark" hidden>Dark</option>
             </select>
           </div>
         </div>
@@ -377,6 +406,7 @@
   <script src="src/fogLayer.js"></script>
   <script src="src/route.js"></script>
   <script src="src/streets.js"></script>
+  <script src="src/streetsLayer.js"></script>
   <script src="src/planner.js"></script>
   <script src="src/suggest.js"></script>
   <script src="src/main.js"></script>
