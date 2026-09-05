@@ -93,7 +93,7 @@
     .sw { width: 24px; height: 24px; border-radius: 6px; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line2); cursor: pointer; }
     .sw.active { box-shadow: 0 0 0 2px var(--accent); }
     .sw.add { display: flex; align-items: center; justify-content: center; background: #fff; color: var(--muted); font-size: 15px; }
-    #colorPick { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
+    #colorPick, #streetColorPick { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
     input[type=range] { flex: 1; accent-color: var(--accent); }
     .stepper { display: inline-flex; align-items: center; gap: 8px; }
     .stepper .step { width: 30px; height: 30px; padding: 0; font-size: 18px; line-height: 1;
@@ -242,18 +242,24 @@
           </div>
           <div class="muted help" id="showHelpText" style="display:none">
             <b>Visited</b> shades the ground you've already defogged.
-            <b>Streets left</b> also highlights the streets and paths still to be defogged
-            (only the stretches still in fog light up). It reads the street map for the area
+            <b>Streets left</b> highlights the streets and paths still covered by fog, so you
+            can spot your best defogging opportunities at a glance. Only the stretches still
+            in fog light up, and the ones your <b>Plan</b> mode can't take (footpaths on a
+            road bike, say) are faded rather than hidden. It reads the street map for the area
             on screen as you pan, so it works zoomed in to about a town at a time.
           </div>
           <div class="row" id="colourRow">Fog
             <span class="swatches" id="swatches"></span>
             <input type="color" id="colorPick" value="#2d3a4a" />
           </div>
+          <div class="row"><span id="alphaLabel">Opacity</span> <input type="range" id="alpha" min="30" max="255" value="150" /></div>
           <div class="row" id="streetsRow" style="display:none">Streets
             <span class="swatches" id="streetSwatches"></span>
+            <input type="color" id="streetColorPick" value="#4fd6e6" />
           </div>
-          <div class="row">Opacity <input type="range" id="alpha" min="30" max="255" value="150" /></div>
+          <div class="row" id="streetsAlphaRow" style="display:none">Street opacity
+            <input type="range" id="streetsAlpha" min="30" max="255" value="255" />
+          </div>
           <div>
             <div class="row">Widen
               <span class="stepper">

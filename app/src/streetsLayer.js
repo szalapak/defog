@@ -9,9 +9,11 @@
 // street you've half walked lights up along its missing half only.
 //
 // Drawing is a glow: a wide translucent halo under a thin bright core, on a
-// canvas pane between the fog and the route overlays. Colours follow the
-// basemap (deep cyan on a light map, pale cyan glow on the dark one) and never
-// borrow the fog swatch colour, which would read as "already defogged".
+// canvas pane between the fog and the route overlays. The colour is the user's
+// own, deepened a little on a light map, and never the fog swatch colour, which
+// would read as "already defogged". Stretches the chosen way of travelling
+// can't take are drawn faintly rather than dropped, so a walk-only alley still
+// shows while you're planning a bike ride.
 (function (global) {
   const TILE_DEG = 0.05;     // download tiles, ~5.5 x 3.5 km at 51°N
   const MAX_TILES = 12;      // bigger views would download too much: ask to zoom in
@@ -21,12 +23,16 @@
   const SLICE_MS = 12;       // classify in slices this long so big cities don't freeze the page
   const RETRY_MS = 10000;    // after a failed download, wait this long before trying again on a move
   const SECOND_TRY_MS = 3000; // Overpass answers 504 when momentarily busy: one quiet retry first
-  // One swatch colour serves both maps: as-is on the dark map, darkened on the light one.
+  // One colour serves both maps: as-is on the dark map, deepened a little on the
+  // light one so it still reads against pale ground while staying bright.
   const DEFAULT_COLOR = "#4fd6e6";
   const OPS = {
-    light: { coreOp: 0.8, haloOp: 0.16, shade: 0.62 },
+    light: { coreOp: 0.72, haloOp: 0.14, shade: 0.82 },
     dark: { coreOp: 0.9, haloOp: 0.3, shade: 1 }
   };
+  const DIM_OP = 0.3; // strength of stretches the chosen transport can't use
+  // Which travel class each Plan mode needs; the rest can go anywhere on foot.
+  const MODE_CLASS = { trekking: "bike", fastbike: "road", "car-fast": "car" };
   function shade(hex, f) {
     const h = hex.replace("#", "");
     const c = [0, 2, 4].map((i) => Math.round(parseInt(h.substr(i, 2), 16) * f));
@@ -53,6 +59,7 @@
     this.look = "light";
     this.color = DEFAULT_COLOR;
     this.opacity = 1;
+    this.travelClass = null;       // null = draw every stretch at full strength
     this.runs = [];                // stretches still to do: [{ll: [[lat, lng], ...], m, s, w, n, e}]
     this.doneRuns = [];            // stretches already defogged (kept for the "% of streets left" readout)
     this._cursor = 0;              // how many of streets.ways have been classified
@@ -62,6 +69,8 @@
       map.getPane("streets").style.zIndex = 360; // above the fog (350), below routes (400)
     }
     const renderer = L.canvas({ pane: "streets" });
+    // faint stretches first, so the ones you can actually take draw over them
+    this.dim = L.polyline([], { renderer, pane: "streets", interactive: false, lineCap: "round", lineJoin: "round" });
     this.halo = L.polyline([], { renderer, pane: "streets", interactive: false, lineCap: "round", lineJoin: "round" });
     this.core = L.polyline([], { renderer, pane: "streets", interactive: false, lineCap: "round", lineJoin: "round" });
     this.badge = new Badge({ position: "topright" });
@@ -72,14 +81,14 @@
     if (on === this.enabled) return;
     this.enabled = on;
     if (on) {
-      this.halo.addTo(this.map); this.core.addTo(this.map);
+      this.dim.addTo(this.map); this.halo.addTo(this.map); this.core.addTo(this.map);
       this.badge.addTo(this.map);
       this.map.on("moveend", this._onMove);
       this._restyle();
       this._update();
     } else {
       this.map.off("moveend", this._onMove);
-      this.map.removeLayer(this.halo); this.map.removeLayer(this.core);
+      this.map.removeLayer(this.dim); this.map.removeLayer(this.halo); this.map.removeLayer(this.core);
       this.map.removeControl(this.badge);
     }
   };
@@ -88,6 +97,13 @@
   StreetsLeftLayer.prototype.setLook = function (look) {
     this.look = OPS[look] ? look : "light";
     this._restyle();
+  };
+  // Plan-tab transport mode: stretches it can't use are drawn faintly.
+  StreetsLeftLayer.prototype.setMode = function (profile) {
+    const c = MODE_CLASS[profile] || null;
+    if (c === this.travelClass) return;
+    this.travelClass = c;
+    if (this.enabled) this._draw();
   };
   StreetsLeftLayer.prototype.setColor = function (hex) {
     this.color = /^#[0-9a-f]{6}$/i.test(hex || "") ? hex : DEFAULT_COLOR;
@@ -113,6 +129,7 @@
     const lk = OPS[this.look], w = coreWeight(this.map.getZoom()), c = this.currentColor();
     this.core.setStyle({ color: c, opacity: lk.coreOp * this.opacity, weight: w });
     this.halo.setStyle({ color: c, opacity: lk.haloOp * this.opacity, weight: w + HALO_EXTRA });
+    this.dim.setStyle({ color: c, opacity: lk.coreOp * this.opacity * DIM_OP, weight: Math.max(1, w - 0.5) });
   };
 
   // Metres of street still to do / already done inside the given bounds, counting
@@ -159,7 +176,7 @@
     const tiles = this._visibleTiles();
     if (tiles.length > MAX_TILES) {
       this._say("Zoom in to see the streets left (up to about a town at a time)");
-      this.halo.setLatLngs([]); this.core.setLatLngs([]);
+      this.dim.setLatLngs([]); this.halo.setLatLngs([]); this.core.setLatLngs([]);
       return;
     }
     if (this._busy) { this._dirty = true; return; }
@@ -213,7 +230,7 @@
       if (run) {
         let s = 90, n = -90, ww = 180, e = -180;
         for (const p of run) { if (p[0] < s) s = p[0]; if (p[0] > n) n = p[0]; if (p[1] < ww) ww = p[1]; if (p[1] > e) e = p[1]; }
-        (runLeft ? this.runs : this.doneRuns).push({ ll: run, m: runM, s, n, w: ww, e });
+        (runLeft ? this.runs : this.doneRuns).push({ id: w.id, ll: run, m: runM, s, n, w: ww, e });
       }
       run = null; runM = 0;
     };
@@ -242,9 +259,14 @@
   StreetsLeftLayer.prototype._draw = function () {
     const b = this.map.getBounds().pad(0.2);
     const s = b.getSouth(), n = b.getNorth(), w = b.getWest(), e = b.getEast();
-    const shown = [];
-    for (const r of this.runs) if (r.m >= MIN_RUN_M && r.n >= s && r.s <= n && r.e >= w && r.w <= e) shown.push(r.ll);
+    // a way we haven't classified yet counts as usable, so nothing fades in late
+    const usable = (id) => !this.travelClass || !this.streets.classified.has(id) ||
+      this.streets.classIds[this.travelClass].has(id);
+    const shown = [], faint = [];
+    for (const r of this.runs)
+      if (r.m >= MIN_RUN_M && r.n >= s && r.s <= n && r.e >= w && r.w <= e) (usable(r.id) ? shown : faint).push(r.ll);
     this._restyle();
+    this.dim.setLatLngs(faint);
     this.halo.setLatLngs(shown);
     this.core.setLatLngs(shown);
     if (this.onStats) this.onStats();

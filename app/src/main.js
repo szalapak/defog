@@ -66,7 +66,8 @@
   if (style.target === "unexplored") style.target = "streets"; // the old whole-world dim was replaced by Streets left
   style.style = "tint";
   const STREET_SWATCHES = ["#4fd6e6", "#5b9cff", "#ff9f43", "#ff6f91", "#a3e635"]; // cyan · blue · orange · coral · lime
-  if (!STREET_SWATCHES.includes(style.streetsColor)) style.streetsColor = STREET_SWATCHES[0];
+  if (!/^#[0-9a-f]{6}$/i.test(style.streetsColor || "")) style.streetsColor = STREET_SWATCHES[0];
+  if (style.streetsAlpha == null) style.streetsAlpha = 255;
   const streetsMode = () => style.target === "streets";
   // Streets left has its own basemap memory (dark by default, where the streets glow);
   // Visited keeps the last light basemap.
@@ -110,6 +111,7 @@
       if (!map.hasLayer(fogLayer)) fogLayer.addTo(map);
     }
     streetsLayer.setColor(style.streetsColor);
+    streetsLayer.setOpacity(style.streetsAlpha / 255);
     streetsLayer.setEnabled(streetsMode());
     updateStreetsStat();
   }
@@ -119,6 +121,8 @@
   }
 
   const alpha = $("alpha"), colorPick = $("colorPick"), swatchBox = $("swatches"), streetSwatchBox = $("streetSwatches");
+  const streetsAlpha = $("streetsAlpha"), streetColorPick = $("streetColorPick");
+  const streetsAlphaRow = $("streetsAlphaRow"), alphaLabel = $("alphaLabel");
   const widenVal = $("widenVal"), widenMinus = $("widenMinus"), widenPlus = $("widenPlus");
   const shadeSeg = $("shadeSeg"), colourRow = $("colourRow"), streetsRow = $("streetsRow"), darkOption = $("basemapDark");
 
@@ -126,8 +130,11 @@
     const sm = streetsMode();
     shadeSeg.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x.dataset.target === style.target));
     colourRow.style.display = sm && darkBasemap() ? "none" : ""; // on the dark map the fog colour is fixed
-    streetsRow.style.display = sm ? "" : "none";
-    streetSwatchBox.querySelectorAll(".sw").forEach((s) => s.classList.toggle("active", s.dataset.c === style.streetsColor));
+    streetsRow.style.display = streetsAlphaRow.style.display = sm ? "" : "none";
+    alphaLabel.textContent = sm ? "Fog opacity" : "Opacity"; // two sliders in this mode, so say which
+    streetSwatchBox.querySelectorAll(".sw:not(.add)").forEach((s) => s.classList.toggle("active", s.dataset.c === style.streetsColor));
+    streetColorPick.value = style.streetsColor;
+    streetsAlpha.value = style.streetsAlpha;
     darkOption.hidden = !sm; // the dark map only makes sense with the streets lit up
     alpha.value = style.alpha;
     colorPick.value = style.color;
@@ -150,6 +157,12 @@
     s.addEventListener("click", () => applyStyle({ streetsColor: c }));
     streetSwatchBox.appendChild(s);
   });
+  const addStreetSw = document.createElement("span");
+  addStreetSw.className = "sw add"; addStreetSw.textContent = "+"; addStreetSw.title = "Custom colour";
+  addStreetSw.addEventListener("click", () => streetColorPick.click());
+  streetSwatchBox.appendChild(addStreetSw);
+  streetColorPick.addEventListener("input", () => applyStyle({ streetsColor: streetColorPick.value }));
+  streetsAlpha.addEventListener("input", () => applyStyle({ streetsAlpha: parseInt(streetsAlpha.value, 10) }));
   SWATCHES.forEach((c) => {
     const s = document.createElement("span");
     s.className = "sw"; s.style.background = c; s.dataset.c = c;
@@ -560,6 +573,7 @@
     profile = p;
     modeBtns.forEach((b) => b.classList.toggle("active", b.dataset.p === p));
     route.setProfile(p);
+    streetsLayer.setMode(p); // streets this mode can't take are drawn faintly
     suggest.clearResults(); // suggestions were ranked for the old mode
   }
   modeBtns.forEach((b) => b.addEventListener("click", () => setMode(b.dataset.p)));
