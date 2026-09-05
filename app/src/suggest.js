@@ -8,6 +8,7 @@
   const BROUTER = "https://brouter.de/brouter";
   const DEFAULT_BUFFER = 0.15;  // p2p: max length over baseline; loop: tolerance around target
   const MAX_VIAS = 6;           // fog-seeking detour candidates per p2p run
+  const VIA_RETRIES = 2;        // times a via is pulled back in when its route overshoots
   const MAX_LOOPS = 6;          // loop bearings tried per run
   const CONCURRENCY = 3;        // parallel BRouter requests (be kind to the public server)
   // Same neon family as the drawn route (#ff2d55): red · pink · orange, which pops against
@@ -162,20 +163,61 @@
     return 1 - visited / total;
   };
 
-  // Coarse geometry fingerprint (8 sampled points on a ~100 m grid) to drop near-duplicates,
-  // e.g. a via candidate that snapped onto the same roads as a BRouter alternative.
-  function sig(coords) {
-    const out = [];
-    for (let i = 0; i < 8; i++) {
-      const p = coords[Math.min(coords.length - 1, Math.round((i / 7) * (coords.length - 1)))];
-      out.push(Math.round(p[0] * 1000) + "," + Math.round(p[1] * 1000));
+  // How much of one route runs along another, used to drop near-duplicates
+  // (e.g. a via candidate that snapped onto the same roads as a BRouter
+  // alternative) and to keep the three shown routes from sharing a corridor.
+  // Routes are walked in fixed metre steps rather than by point index, so the
+  // answer doesn't depend on how densely BRouter happened to place points, and
+  // one route's path is stamped into a grid of NEAR_CELL squares and the other
+  // is counted as alongside it wherever it lands within NEAR_PAD squares of a
+  // stamped one. "Runs along" therefore means "within about 30 m", and
+  // comparing two routes costs one walk of each rather than a test of every
+  // segment against every other segment.
+  const NEAR_CELL = 15;      // metres per grid square
+  const NEAR_PAD = 2;        // squares of slack allowed when matching
+  const SAME_ROUTE = 0.9;    // above this share it's the same route again, never show it
+  const SAME_CORRIDOR = 0.6; // above this it's the same way there, show it only to fill a slot
+
+  // Call fn(x, y, lenM) at the midpoint of every stepM-long piece of the route,
+  // in a local metric frame.
+  function walk(coords, kx, ky, stepM, fn) {
+    for (let i = 1; i < coords.length; i++) {
+      const ax = coords[i - 1][0] * kx, ay = coords[i - 1][1] * ky;
+      const bx = coords[i][0] * kx, by = coords[i][1] * ky;
+      const d = Math.hypot(bx - ax, by - ay);
+      const n = Math.max(1, Math.ceil(d / stepM));
+      for (let k = 0; k < n; k++)
+        fn(ax + (bx - ax) * (k + 0.5) / n, ay + (by - ay) * (k + 0.5) / n, d / n);
     }
-    return out;
   }
-  function sameSig(s1, s2) {
-    let m = 0;
-    for (let i = 0; i < 8; i++) if (s1[i] === s2[i]) m++;
-    return m >= 7;
+
+  // The grid squares a route passes through.
+  function footprint(coords, kx, ky) {
+    const cells = new Set();
+    walk(coords, kx, ky, NEAR_CELL, (x, y) =>
+      cells.add(Math.round(x / NEAR_CELL) + "," + Math.round(y / NEAR_CELL)));
+    return cells;
+  }
+
+  function nearCells(cells, x, y) {
+    const cx = Math.round(x / NEAR_CELL), cy = Math.round(y / NEAR_CELL);
+    for (let dx = -NEAR_PAD; dx <= NEAR_PAD; dx++)
+      for (let dy = -NEAR_PAD; dy <= NEAR_PAD; dy++)
+        if (cells.has((cx + dx) + "," + (cy + dy))) return true;
+    return false;
+  }
+
+  // Share of this route's length (0..1) that runs alongside the footprint.
+  // Deliberately one-directional: the question is how much of THIS route the
+  // reader has already seen, so a short route inside a long one scores high,
+  // while a long route that merely contains a short one does not.
+  function sharedFrac(coords, cells, kx, ky) {
+    let total = 0, shared = 0;
+    walk(coords, kx, ky, NEAR_CELL, (x, y, len) => {
+      total += len;
+      if (nearCells(cells, x, y)) shared += len;
+    });
+    return total ? shared / total : 0;
   }
 
   // deg -> local metres around a latitude
@@ -247,33 +289,40 @@
     return out;
   };
 
-  // For loops, show the best loop in each of three distinct directions rather
-  // than two variations on the same way: a candidate is taken only if no
+  // Show three routes that go different ways rather than three variations on
+  // one. Loops are separated by direction: a candidate is taken only if no
   // already-taken loop heads within 60 degrees of it (heading = start pin to
   // the loop's farthest point). Angular distance, so headings either side of
-  // due north (350 and 10 degrees) count as the same direction. Whatever the
-  // direction rule defers is appended best-first, so if the geography only
-  // offers one or two directions (water, a dead end) the deck still fills and
-  // this never invents variety that isn't there. (A→B has a fixed direction,
-  // so this only runs for loops.)
-  SuggestTool.prototype._diversify = function (ranked, extra) {
-    if (extra.targetKm == null || !this.a || ranked.length <= 2) return ranked;
-    const S = this.a.getLatLng();
-    const bearing = (c) => {
-      let far = c.r.coords[0], fd = -1;
-      for (const p of c.r.coords) {
-        const d = (p[1] - S.lat) * (p[1] - S.lat) + (p[0] - S.lng) * (p[0] - S.lng);
-        if (d > fd) { fd = d; far = p; }
-      }
-      return (((Math.atan2(far[0] - S.lng, far[1] - S.lat) * 180 / Math.PI) + 360) % 360);
-    };
-    const apart = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
-    const picked = [], rest = [];
-    for (const c of ranked) {
-      const b = bearing(c);
-      if (picked.every((o) => apart(o._brg, b) > 60)) { c._brg = b; picked.push(c); }
-      else rest.push(c);
+  // due north (350 and 10 degrees) count as the same direction. A→B has a
+  // fixed direction, so those are separated by ground instead: a candidate is
+  // taken only if less than SAME_CORRIDOR of its length runs along a route
+  // already taken, which catches the real failure, two routes sharing a middle.
+  // Whatever either rule defers is appended best-first, so where the geography
+  // offers only one or two ways (water, a dead end, one bridge) the deck still
+  // fills and this never invents variety that isn't there.
+  SuggestTool.prototype._diversify = function (ranked, extra, kx, ky) {
+    if (ranked.length <= 2) return ranked;
+    const loop = extra.targetKm != null;
+    if (loop && !this.a) return ranked;
+    let differs;
+    if (loop) {
+      const S = this.a.getLatLng();
+      const bearing = (c) => {
+        let far = c.r.coords[0], fd = -1;
+        for (const p of c.r.coords) {
+          const d = (p[1] - S.lat) * (p[1] - S.lat) + (p[0] - S.lng) * (p[0] - S.lng);
+          if (d > fd) { fd = d; far = p; }
+        }
+        return (((Math.atan2(far[0] - S.lng, far[1] - S.lat) * 180 / Math.PI) + 360) % 360);
+      };
+      const apart = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+      for (const c of ranked) c._brg = bearing(c);
+      differs = (c, taken) => taken.every((o) => apart(o._brg, c._brg) > 60);
+    } else {
+      differs = (c, taken) => taken.every((o) => sharedFrac(c.r.coords, o.cells, kx, ky) < SAME_CORRIDOR);
     }
+    const picked = [], rest = [];
+    for (const c of ranked) (differs(c, picked) ? picked : rest).push(c);
     return picked.concat(rest);
   };
 
@@ -285,7 +334,6 @@
     // Score first, rank, THEN dedupe, because near-identical routes must collapse onto the
     // best-gaining of the pair, not whichever happened to be scored first.
     let scored = cands.map((c) => Object.assign({
-      s: sig(c.r.coords),
       gain: this.computeGain(c.r.coords) || { area: 0, newPct: 0 }
     }, c));
     // a route that breaks <1% new ground isn't a suggestion, it's a re-walk
@@ -295,12 +343,15 @@
     // routes that defog the same area, the one that isn't mostly a re-walk wins
     const key = (c) => c.gain.area * (0.7 + 0.3 * Math.min(1, c.gain.newPct / 100));
     scored.sort((x, y) => key(y) - key(x));
+    // One local metric frame for the whole run, so footprints are comparable.
+    const { kx, ky } = metresPerDeg(scored[0].r.coords[0][1]);
     const unique = [];
     for (const c of scored) {
-      if (unique.some((o) => sameSig(o.s, c.s))) continue;
+      if (unique.some((o) => sharedFrac(c.r.coords, o.cells, kx, ky) > SAME_ROUTE)) continue;
+      c.cells = footprint(c.r.coords, kx, ky);
       unique.push(c);
     }
-    this.results = this._diversify(unique, extra).slice(0, 3);
+    this.results = this._diversify(unique, extra, kx, ky).slice(0, 3);
 
     this.lines = this.results.map((c, i) => {
       const runs = splitRuns(c.r.coords, this.isNew);
@@ -481,20 +532,34 @@
     // dropped p2p's best card. Trim only slightly to bound the request count.
     for (const v of this._pickVias(rawVias).slice(0, planned.length ? MAX_VIAS - 1 : MAX_VIAS))
       jobs.push(async () => {
-        // real streets inflate the straight-line ellipse bound, so a via route often
-        // overshoots the budget, so pull the via toward the line proportionally and retry
-        let ll = v.latlng;
+        // Real streets inflate the straight-line ellipse the via was placed
+        // inside, so a via route usually overshoots the budget. Pull the via
+        // back toward the line and re-ask, up to VIA_RETRIES times, each time
+        // rescaling from the length just measured rather than from the first
+        // guess: one shot assumes routed length grows evenly with the offset,
+        // and around a barrier like a river it doesn't. Where it did, every
+        // detour overshot twice over and was binned, leaving only BRouter's own
+        // alternatives, which are minor variations on a single line.
+        let ll = v.latlng, d = v.d;
         let r = await this._route([A, ll, B], profile, 0);
-        if (r && r.lenM > budget && r.lenM < budget * 1.8 && r.lenM > base.lenM) {
+        let best = r, bestLl = ll;
+        for (let k = 0; k < VIA_RETRIES; k++) {
+          // 3: past this the via is in the wrong place entirely, not just too far out
+          if (!r || !r.lenM || r.lenM <= budget || r.lenM <= base.lenM || r.lenM > budget * 3) break;
           // 0.95: aim just inside the budget, because the best detours live right at the edge
           const shrink = Math.max(0.2, Math.min(0.9, 0.95 * (budget - base.lenM) / (r.lenM - base.lenM)));
-          const d = v.d * shrink;
-          const ll2 = d >= 120 ? this._viaPoint(v.t, v.side, d) : null;
-          if (ll2) {
-            const r2 = await this._route([A, ll2, B], profile, 0);
-            if (r2 && r2.lenM) { r = r2; ll = ll2; }
-          }
+          const d2 = d * shrink;
+          const ll2 = d2 >= 120 ? this._viaPoint(v.t, v.side, d2) : null;
+          if (!ll2) break;
+          const r2 = await this._route([A, ll2, B], profile, 0);
+          if (!r2 || !r2.lenM) break;
+          // pulling the via in usually shortens the route but not always, so keep
+          // the shortest seen rather than the last: the loop stops at the first
+          // one that fits, so that's the one this holds on to
+          if (!best.lenM || r2.lenM < best.lenM) { best = r2; bestLl = ll2; }
+          r = r2; ll = ll2; d = d2;
         }
+        r = best; ll = bestLl;
         // 1.02: don't bin a paid-for route for skimming the budget by metres
         if (!r || !r.lenM || r.lenM > budget * 1.02) return null;
         const snip = snipOldSpurs(r.coords, this.computeGain, 0);
