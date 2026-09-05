@@ -142,7 +142,7 @@
     @media (pointer: coarse) { .wp { font-size: 13px; } }
 
     .leaflet-bar { border-radius: 9px !important; overflow: hidden; border: 1px solid var(--line2) !important; }
-    /* small on-map note for the Streets left look ("zoom in", "reading the street map") */
+    /* small on-map note for the Streets in fog look ("zoom in", "reading the street map") */
     .streetsBadge { background: var(--card); color: var(--ink); font-family: var(--mono); font-size: 12px;
       padding: 6px 10px; border-radius: 9px; border: 1px solid var(--line2); box-shadow: 0 1px 4px #0000000f;
       max-width: 240px; line-height: 1.4; }
@@ -191,7 +191,7 @@
       <span class="brand" id="brandName">DEFOG</span>
       <span class="tag">// go where the fog is</span>
       <span id="hint">load your fog to begin →</span>
-      <span id="defog"><b id="defogPct">0%</b> defogged<span id="streetsStat" style="display:none"><span class="sep">//</span><b id="streetsPct">0%</b> streets left</span></span>
+      <span id="defog"><b id="defogPct">0%</b> defogged<span id="streetsStat" style="display:none"><span class="sep">//</span><b id="streetsPct">0%</b> streets in fog</span></span>
     </div>
 
     <div id="main">
@@ -235,14 +235,14 @@
           <div class="row" id="showRow">Show
             <span class="seg" id="shadeSeg">
               <button data-target="explored" class="active">Visited</button>
-              <button data-target="streets">Streets left</button>
+              <button data-target="streets">Streets in fog</button>
             </span>
             <button id="showHelp" class="qm" type="button" aria-expanded="false"
                     aria-controls="showHelpText" title="What do these show?">?</button>
           </div>
           <div class="muted help" id="showHelpText" style="display:none">
             <b>Visited</b> shades the ground you've already defogged.
-            <b>Streets left</b> highlights the streets and paths still covered by fog, so you
+            <b>Streets in fog</b> highlights the streets and paths still covered by fog, so you
             can spot your best defogging opportunities at a glance. Only the stretches still
             in fog light up, and the ones your <b>Plan</b> mode can't take (footpaths on a
             road bike, say) are faded rather than hidden. It reads the street map for the area

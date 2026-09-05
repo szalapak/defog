@@ -14,7 +14,7 @@ uploaded anywhere.
 - Renders the fog as a canvas overlay on a real basemap (OSM / CyclOSM / a dark
   variant of OSM), decoding only the tiles in view so large datasets stay responsive.
 - **Fog look:** shade the ground you've visited (colour, opacity, and **Widen** to fatten
-  thin tracks), or switch to **Streets left**, which keeps that shading and highlights the
+  thin tracks), or switch to **Streets in fog**, which keeps that shading and highlights the
   streets and paths still covered by fog, heatmap-style. Only the stretches still in fog
   light up, so a half-done street shows just its missing half, and the ones your Plan mode
   can't take are faded rather than hidden. Pick the highlight colour and strength; works
@@ -41,7 +41,7 @@ waypoints to the public [BRouter](https://brouter.de) server to snap them to roa
 suggestions this includes a handful of automatically generated candidate points near your
 chosen area (their placement is influenced by where your fog is, but the fog itself is
 never sent); route suggestions fetch the **street map of the area around your pins**, and the
-**Streets left** look fetches the street map of the **area on screen**, both from the public
+**Streets in fog** look fetches the street map of the **area on screen**, both from the public
 [Overpass API](https://overpass-api.de) (OpenStreetMap), which only sees
 bounding boxes, the same class of information the basemap tile servers already get, and
 the streets are compared against your fog entirely on your device; and **"Maps ↗"** opens

@@ -60,29 +60,29 @@
   const WIDEN_MAX = 4;
 
   const saved = JSON.parse(localStorage.getItem("f2m_style") || "null");
-  // target: "explored" shades the ground you've defogged; "streets" lights up the streets left
+  // target: "explored" shades the ground you've defogged; "streets" lights up the streets in fog
   let style = saved || { target: "explored", color: "#2d3a4a", alpha: 150, dilate: 1 };
   if (style.dilate == null) style.dilate = 1;
-  if (style.target === "unexplored") style.target = "streets"; // the old whole-world dim was replaced by Streets left
+  if (style.target === "unexplored") style.target = "streets"; // the old whole-world dim was replaced by Streets in fog
   style.style = "tint";
   const STREET_SWATCHES = ["#4fd6e6", "#5b9cff", "#ff9f43", "#ff6f91", "#a3e635"]; // cyan · blue · orange · coral · lime
   if (!/^#[0-9a-f]{6}$/i.test(style.streetsColor || "")) style.streetsColor = STREET_SWATCHES[0];
   if (style.streetsAlpha == null) style.streetsAlpha = 255;
   const streetsMode = () => style.target === "streets";
-  // Streets left has its own basemap memory (dark by default, where the streets glow);
+  // Streets in fog has its own basemap memory (dark by default, where the streets glow);
   // Visited keeps the last light basemap.
   let streetsBasemap = localStorage.getItem("f2m_streetsBasemap") || "dark";
 
   const persist = () => localStorage.setItem("f2m_style", JSON.stringify(style));
 
-  // Street data is shared by the route suggestions and the Streets left look, so
+  // Street data is shared by the route suggestions and the Streets in fog look, so
   // whichever fetched an area first serves the other.
   const streets = new StreetIndex({ newFrac: corridorNewFrac });
-  streetsLayer = new StreetsLeftLayer(map, { streets, isNew: cellIsNew, onStats: () => updateStreetsStat() });
+  streetsLayer = new StreetsInFogLayer(map, { streets, isNew: cellIsNew, onStats: () => updateStreetsStat() });
   streetsLayer.setLook(BASEMAPS[$("basemap").value].dark ? "dark" : "light");
 
-  // "// 61% streets left": share of the street length inside the frame still to be defogged,
-  // shown in the streets' own colour while Streets left is on.
+  // "// 61% streets in fog": share of the street length inside the frame still to be defogged,
+  // shown in the streets' own colour while Streets in fog is on.
   const streetsStat = $("streetsStat"), streetsPct = $("streetsPct");
   function updateStreetsStat() {
     let show = streetsMode() && fogMap.tileCount > 0;
@@ -102,7 +102,7 @@
   const darkBasemap = () => !!BASEMAPS[$("basemap").value].dark;
 
   // Put the right layers on the map for the chosen look: the visited fog is
-  // always there; Streets left adds the highlighted streets on top.
+  // always there; Streets in fog adds the highlighted streets on top.
   function applyLayers() {
     if (fogLayer) {
       const fs = Object.assign({}, style, { target: "explored" });
@@ -146,8 +146,8 @@
   function applyStyle(patch) {
     const wasStreets = streetsMode();
     Object.assign(style, patch); persist();
-    if (streetsMode() && !wasStreets) setBasemap(streetsBasemap);              // entering Streets left: its own (dark) map
-    if (!streetsMode() && darkBasemap()) setBasemap(lastLightBasemap);         // leaving Streets left: back to a light map
+    if (streetsMode() && !wasStreets) setBasemap(streetsBasemap);              // entering Streets in fog: its own (dark) map
+    if (!streetsMode() && darkBasemap()) setBasemap(lastLightBasemap);         // leaving Streets in fog: back to a light map
     syncControls();
     applyLayers();
   }
@@ -180,7 +180,7 @@
   const stepWiden = (d) => applyStyle({ dilate: Math.max(0, Math.min(WIDEN_MAX, style.dilate + d)) });
   widenMinus.addEventListener("click", () => stepWiden(-1));
   widenPlus.addEventListener("click", () => stepWiden(1));
-  if (!streetsMode() && darkBasemap()) setBasemap(lastLightBasemap); // a dark map only belongs to Streets left
+  if (!streetsMode() && darkBasemap()) setBasemap(lastLightBasemap); // a dark map only belongs to Streets in fog
   syncControls();
   applyLayers();
 
@@ -300,7 +300,7 @@
 
   // Is this point on genuinely new ground? True only if NO already-visited cell sits within
   // the ~DEFOG_HALF_M corridor, so weaving a cell off a road you've done doesn't read as new.
-  // (The Streets left look passes a slightly wider radius to forgive GPS wobble.)
+  // (The Streets in fog look passes a slightly wider radius to forgive GPS wobble.)
   function cellIsNew(lon, lat, withinM) {
     const r = Math.max(1, Math.round((withinM || DEFOG_HALF_M) / cellMetersAt(lat)));
     const c = FogParser.lngLatToCell(lon, lat);

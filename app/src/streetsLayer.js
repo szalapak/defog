@@ -1,4 +1,4 @@
-// "Streets left": lights up the streets and paths you haven't defogged yet.
+// "Streets in fog": lights up the streets and paths still covered by fog.
 //
 // Street geometry for the area on screen comes from the shared StreetIndex
 // (Overpass, fetched in fixed tiles so panning reuses what's already cached).
@@ -50,7 +50,7 @@
     }
   });
 
-  function StreetsLeftLayer(map, opts) {
+  function StreetsInFogLayer(map, opts) {
     this.map = map;
     this.streets = opts.streets;   // shared StreetIndex
     this.isNew = opts.isNew;       // (lon, lat, radiusM) -> true when no defogged cell is within radius
@@ -61,7 +61,7 @@
     this.opacity = 1;
     this.travelClass = null;       // null = draw every stretch at full strength
     this.runs = [];                // stretches still to do: [{ll: [[lat, lng], ...], m, s, w, n, e}]
-    this.doneRuns = [];            // stretches already defogged (kept for the "% of streets left" readout)
+    this.doneRuns = [];            // stretches already defogged (kept for the "% of streets in fog" readout)
     this._cursor = 0;              // how many of streets.ways have been classified
     this._busy = false; this._dirty = false; this._retryAt = 0;
     if (!map.getPane("streets")) {
@@ -77,7 +77,7 @@
     this._onMove = () => this._update();
   }
 
-  StreetsLeftLayer.prototype.setEnabled = function (on) {
+  StreetsInFogLayer.prototype.setEnabled = function (on) {
     if (on === this.enabled) return;
     this.enabled = on;
     if (on) {
@@ -94,37 +94,37 @@
   };
 
   // look: "dark" | "light", matching the basemap
-  StreetsLeftLayer.prototype.setLook = function (look) {
+  StreetsInFogLayer.prototype.setLook = function (look) {
     this.look = OPS[look] ? look : "light";
     this._restyle();
   };
   // Plan-tab transport mode: stretches it can't use are drawn faintly.
-  StreetsLeftLayer.prototype.setMode = function (profile) {
+  StreetsInFogLayer.prototype.setMode = function (profile) {
     const c = MODE_CLASS[profile] || null;
     if (c === this.travelClass) return;
     this.travelClass = c;
     if (this.enabled) this._draw();
   };
-  StreetsLeftLayer.prototype.setColor = function (hex) {
+  StreetsInFogLayer.prototype.setColor = function (hex) {
     this.color = /^#[0-9a-f]{6}$/i.test(hex || "") ? hex : DEFAULT_COLOR;
     this._restyle();
   };
   // The colour the streets are drawn in right now (the header readout matches it).
-  StreetsLeftLayer.prototype.currentColor = function () {
+  StreetsInFogLayer.prototype.currentColor = function () {
     return shade(this.color, OPS[this.look].shade);
   };
-  StreetsLeftLayer.prototype.setOpacity = function (a) {
+  StreetsInFogLayer.prototype.setOpacity = function (a) {
     this.opacity = Math.max(0, Math.min(1, a));
     this._restyle();
   };
 
   // The fog changed (more tiles loaded): every way needs judging again.
-  StreetsLeftLayer.prototype.invalidateFog = function () {
+  StreetsInFogLayer.prototype.invalidateFog = function () {
     this.runs = []; this.doneRuns = []; this._cursor = 0;
     if (this.enabled) this._update();
   };
 
-  StreetsLeftLayer.prototype._restyle = function () {
+  StreetsInFogLayer.prototype._restyle = function () {
     if (!this.enabled) return;
     const lk = OPS[this.look], w = coreWeight(this.map.getZoom()), c = this.currentColor();
     this.core.setStyle({ color: c, opacity: lk.coreOp * this.opacity, weight: w });
@@ -134,7 +134,7 @@
 
   // Metres of street still to do / already done inside the given bounds, counting
   // each 20 m piece by its midpoint. Only meaningful for the area already fetched.
-  StreetsLeftLayer.prototype.statsInView = function (b) {
+  StreetsInFogLayer.prototype.statsInView = function (b) {
     const s = b.getSouth(), n = b.getNorth(), w = b.getWest(), e = b.getEast();
     const ky = 110540, kx = 111320 * Math.cos(((s + n) / 2) * Math.PI / 180);
     const sum = (list) => {
@@ -153,7 +153,7 @@
     return { leftM: sum(this.runs), doneM: sum(this.doneRuns) };
   };
 
-  StreetsLeftLayer.prototype._say = function (text) {
+  StreetsInFogLayer.prototype._say = function (text) {
     const el = this.badge.getContainer();
     if (!el) return;
     el.textContent = text || "";
@@ -161,7 +161,7 @@
   };
 
   // Fixed-grid tiles touching the current view.
-  StreetsLeftLayer.prototype._visibleTiles = function () {
+  StreetsInFogLayer.prototype._visibleTiles = function () {
     const b = this.map.getBounds();
     const tx0 = Math.floor(b.getWest() / TILE_DEG), tx1 = Math.floor(b.getEast() / TILE_DEG);
     const ty0 = Math.floor(b.getSouth() / TILE_DEG), ty1 = Math.floor(b.getNorth() / TILE_DEG);
@@ -171,11 +171,11 @@
     return tiles;
   };
 
-  StreetsLeftLayer.prototype._update = async function () {
+  StreetsInFogLayer.prototype._update = async function () {
     if (!this.enabled) return;
     const tiles = this._visibleTiles();
     if (tiles.length > MAX_TILES) {
-      this._say("Zoom in to see the streets left (up to about a town at a time)");
+      this._say("Zoom in to see the streets in fog (about a town at a time)");
       this.dim.setLatLngs([]); this.halo.setLatLngs([]); this.core.setLatLngs([]);
       return;
     }
@@ -208,7 +208,7 @@
   // Judge the ways fetched since last time, in short time slices. Yields through a
   // message channel rather than a timer or animation frame: those are throttled
   // or paused in a background tab, and this should finish there too.
-  StreetsLeftLayer.prototype._classifyNew = function () {
+  StreetsInFogLayer.prototype._classifyNew = function () {
     return new Promise((resolve) => {
       const ch = new MessageChannel();
       const step = () => {
@@ -222,7 +222,7 @@
   };
 
   // Split one way into runs of consecutive "left" pieces and consecutive "done" pieces.
-  StreetsLeftLayer.prototype._classifyWay = function (w) {
+  StreetsInFogLayer.prototype._classifyWay = function (w) {
     const g = w.geometry;
     const ky = 110540, kx = 111320 * Math.cos(g[0].lat * Math.PI / 180);
     let run = null, runM = 0, runLeft = false;
@@ -256,7 +256,7 @@
   };
 
   // Draw the runs near the view (a margin so a small pan doesn't show edges).
-  StreetsLeftLayer.prototype._draw = function () {
+  StreetsInFogLayer.prototype._draw = function () {
     const b = this.map.getBounds().pad(0.2);
     const s = b.getSouth(), n = b.getNorth(), w = b.getWest(), e = b.getEast();
     // a way we haven't classified yet counts as usable, so nothing fades in late
@@ -272,5 +272,5 @@
     if (this.onStats) this.onStats();
   };
 
-  global.StreetsLeftLayer = StreetsLeftLayer;
+  global.StreetsInFogLayer = StreetsInFogLayer;
 })(window);
