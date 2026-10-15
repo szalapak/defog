@@ -2,11 +2,12 @@
 // Resolves with the tool's final results plus request/timing counters.
 "use strict";
 const { SuggestTool, StreetIndex, L } = require("./load.js");
+const { overlapFrac } = SuggestTool._internals;
 const cache = require("./fetch-cache.js");
 
 function pin(lat, lng) { const ll = L.latLng(lat, lng); return { getLatLng: () => ll }; }
 
-// scenario: { mode, a:[lat,lng], b?, distM?, profile, buffer, noStreets? }
+// scenario: { mode, a:[lat,lng], b?, distM?, targetM? (p2p wanted distance), profile, buffer, noStreets? }
 function runSuggest(fogMap, gain, scenario) {
   cache.install();
   return new Promise((resolve, reject) => {
@@ -22,7 +23,11 @@ function runSuggest(fogMap, gain, scenario) {
         const c = cache.counters();
         resolve({
           state: s,
-          results: tool.results.map((r) => ({ coords: r.r.coords, lenM: r.r.lenM, gain: r.gain, isBase: !!r.isBase })),
+          results: tool.results.map((r) => ({
+            coords: r.r.coords, lenM: r.r.lenM, gain: r.gain, isBase: !!r.isBase,
+            retracePct: Math.round(100 * overlapFrac(r.r.coords, false)),
+            areaPerKm: r.gain.area / (r.r.lenM / 1000)
+          })),
           requests: c.hits + c.misses, cacheHits: c.hits, ms: Date.now() - t0
         });
       }
@@ -30,7 +35,7 @@ function runSuggest(fogMap, gain, scenario) {
     tool.mode = scenario.mode;
     tool.a = pin(scenario.a[0], scenario.a[1]);
     if (scenario.b) tool.b = pin(scenario.b[0], scenario.b[1]);
-    tool.suggest(scenario.profile, { distM: scenario.distM, buffer: scenario.buffer || 0.15 })
+    tool.suggest(scenario.profile, { distM: scenario.distM, targetM: scenario.targetM, buffer: scenario.buffer || 0.15 })
       .catch(reject);
     const guard = setTimeout(() => reject(new Error("suggest timed out")), 600000);
     guard.unref(); // don't hold the process open after results resolve

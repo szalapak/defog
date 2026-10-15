@@ -1,5 +1,6 @@
 # Personal Fog of World location data. NEVER commit (each user loads their own)
 Sync/
+Sync*.zip
 *.mldx
 
 # OS / editor cruft

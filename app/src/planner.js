@@ -17,6 +17,8 @@
                               // starved (9 of 60 in reach at one field start)
   const MAX_ANCHORS = 9;      // start + up to 8 pockets per loop
   const RICH_PULL = 0.65;     // how strongly connecting paths bend toward reward
+  const REUSE_COST = 1.8;     // cost multiplier for re-walking an edge the plan already used
+  const RETRACE_WEIGHT = 0.5; // ranking discount for re-walked ground: predicted gain doesn't price the re-walk
   const PARALLEL_M = 22;      // spending an edge also spends parallels this close
 
   // ---- binary heap keyed by dist -------------------------------------------
@@ -226,7 +228,7 @@
   GraphPlanner.prototype._richPath = function (u, v) {
     const { dist, prev } = this._dijkstra(u, (ei) => {
       const e = this.edges[ei];
-      if (this.usedVer[ei] >= this.ver) return e.len * 1.8;
+      if (this.usedVer[ei] >= this.ver) return e.len * REUSE_COST;
       const rate = this._fresh(ei) / e.len;
       return e.len * (1 - RICH_PULL * Math.min(1, rate / CORRIDOR_M));
     });
@@ -244,6 +246,7 @@
     const coords = [];
     let at = u;
     for (const ei of edgeIds) {
+      this.walks.set(ei, (this.walks.get(ei) || 0) + 1);
       const e = this.edges[ei];
       const cs = e.a === at ? e.coords : e.coords.slice().reverse();
       for (const c of cs) {
@@ -330,6 +333,7 @@
 
   GraphPlanner.prototype._materialize = function (anchors, cyclic) {
     this.ver++;
+    this.walks = new Map();
     const seq = cyclic ? anchors.concat([anchors[0]]) : anchors;
     let coords = [], len = 0, gained = 0;
     for (let i = 1; i < seq.length; i++) {
@@ -338,7 +342,10 @@
       coords = coords.length ? coords.concat(leg.coords.slice(1)) : leg.coords;
       len += leg.len; gained += leg.gained;
     }
-    return { coords, len, gained };
+    // metres on edges walked more than once, both passes counted (as overlapFrac does)
+    let twice = 0;
+    for (const [ei, n] of this.walks) if (n > 1) twice += this.edges[ei].len * n;
+    return { coords, len, gained, retraceFrac: len ? Math.min(1, twice / len) : 0 };
   };
 
   function resampleWps(coords, n, kx, ky) {
@@ -509,10 +516,11 @@
       }
       if (!m || m.len > budgetM * 1.1) continue;
       const nWps = Math.min(16, Math.max(2, Math.round(m.len / 550)));
-      out.push({ wps: [A].concat(resampleWps(m.coords, nWps, this.kx, this.ky), [B]), predM2: m.gained, lenM: m.len });
+      out.push({ wps: [A].concat(resampleWps(m.coords, nWps, this.kx, this.ky), [B]), predM2: m.gained, lenM: m.len, retraceFrac: m.retraceFrac });
       if (out.length >= nCands + 1) break;
     }
-    out.sort((x, y) => y.predM2 - x.predM2);
+    const score = (p) => p.predM2 * (1 - RETRACE_WEIGHT * p.retraceFrac);
+    out.sort((x, y) => score(y) - score(x));
     return dedupePlans(out).slice(0, nCands);
   };
 

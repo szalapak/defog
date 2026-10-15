@@ -37,7 +37,7 @@
       font-family: var(--mono); font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent; }
     select { font-family: var(--mono); font-size: 13px; padding: 7px 9px; border: 1px solid var(--line2);
       border-radius: 9px; background: #fff; color: var(--ink); }
-    input[type=number] { font-family: var(--mono); font-size: 13px; padding: 7px 9px; width: 76px;
+    input[type=number] { font-family: var(--mono); font-size: 13px; padding: 7px 9px; width: 96px;
       border: 1px solid var(--line2); border-radius: 9px; background: #fff; color: var(--ink); }
     .tabs button.active { color: var(--ink); font-weight: 700; border-bottom-color: var(--accent); }
     .pane { display: none; padding: 16px; overflow-y: auto; }
@@ -344,21 +344,27 @@
               <input type="number" id="sugDist" min="1" step="0.5" value="10" />
               <span class="muted" id="sugDistUnit">km</span>
             </div>
+            <div class="row" id="sugTargetRow">Distance
+              <input type="number" id="sugTarget" min="1" step="0.5" placeholder="optional" />
+              <span class="muted" id="sugTargetUnit">km</span>
+            </div>
             <div class="row">Buffer
               <span class="seg" id="sugBufSeg">
-                <button data-b="5">+5%</button>
-                <button data-b="15" class="active">+15%</button>
-                <button data-b="30">+30%</button>
+                <button data-b="5">5%</button>
+                <button data-b="15" class="active">15%</button>
+                <button data-b="30">30%</button>
               </span>
               <button id="sugBufHelp" class="qm" type="button" aria-expanded="false"
                       aria-controls="sugBufHelpText" title="What is Buffer?">?</button>
             </div>
             <div class="muted help" id="sugBufHelpText" style="display:none">
-              How much further you’re willing to go to defog more.
-              <br><b>A &rarr; B:</b> how much you’ll add to the fastest route.
-              At +15%, a 20&nbsp;km trip can stretch to 23&nbsp;km.
-              <br><b>Loop:</b> how much further you’re willing to go beyond the target.
-              At +15%, a 10&nbsp;km target gives you loops of 8.5 to 11.5&nbsp;km.
+              How much slack routes get to defog more.
+              <br><b>A &rarr; B:</b> without a distance, routes can run this much longer than the fastest one.
+              At 15%, a 20&nbsp;km trip can stretch to 23&nbsp;km.
+              With a distance set, it is the tolerance either side of that distance instead:
+              12&nbsp;km at 15% gives routes of 10.2 to 13.8&nbsp;km (never shorter than the fastest route).
+              <br><b>Loop:</b> how far either side of the target a loop may land.
+              At 15%, a 10&nbsp;km target gives you loops of 8.5 to 11.5&nbsp;km.
               <br>Pick a bigger buffer to reach more new ground, at the cost of a longer route.
             </div>
             <div class="row" style="margin-top:10px;">
